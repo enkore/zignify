@@ -1,12 +1,9 @@
 const std = @import("std");
-const io = std.io;
-const print = @import("std").debug.print;
-
+const print = std.debug.print;
 const Ed25519 = std.crypto.sign.Ed25519;
+const b64decoder = std.base64.standard.Decoder;
 
 const comment_hdr = "untrusted comment: ";
-
-const b64decoder = std.base64.standard.Decoder;
 
 const Signature = packed struct {
     // This is always "Ed" for Ed25519.
@@ -64,9 +61,7 @@ fn verify_message(pubkey: PubKey, signature: Signature, msg: []const u8) !void {
     if (!std.mem.eql(u8, &pubkey.keynum, &signature.keynum)) {
         return error.WrongPublicKey;
     }
-    const r = Ed25519.verify(signature.sig, msg, pubkey.pubkey);
-    std.log.info("verify ok", .{});
-    return r;
+    return Ed25519.verify(signature.sig, msg, pubkey.pubkey);
 }
 
 fn read_file(path: []const u8, max_size: u32, allocator: *std.mem.Allocator) ![]u8 {
@@ -90,8 +85,6 @@ fn read_base64_file(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
     if (iter.next() != null) {
         return error.GarbageAtEndOfFile;
     }
-
-    std.log.info("Found base64 line: {s} (len={d}, decoded={d})", .{ line, std.mem.len(line), b64decoder.calcSizeForSlice(line) });
 
     const dec = try allocator.alloc(u8, try b64decoder.calcSizeForSlice(line));
     try b64decoder.decode(dec[0..dec.len], line);
