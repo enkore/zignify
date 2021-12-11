@@ -14,15 +14,12 @@ const Signature = packed struct {
     sig: [Ed25519.signature_length]u8,
 
     fn from_bytes(bytes: []const u8) !Signature {
-        if (bytes.len != 74) {
+        const size = @sizeOf(Signature);
+        if (bytes.len != size)
             return error.InvalidLength;
-        }
-        var dec2: [74]u8 = undefined;
-        std.mem.copy(u8, dec2[0..], bytes);
-        const self = @bitCast(Signature, dec2);
-        if (!std.mem.eql(u8, &self.pkalg, "Ed")) {
+        const self = @bitCast(Signature, bytes[0..size].*);
+        if (!std.mem.eql(u8, &self.pkalg, "Ed"))
             return error.UnsupportedAlgorithm;
-        }
         return self;
     }
 
@@ -39,15 +36,12 @@ const PubKey = packed struct {
     pubkey: [Ed25519.public_length]u8,
 
     fn from_bytes(bytes: []const u8) !PubKey {
-        if (bytes.len != 42) {
+        const size = @sizeOf(PubKey);
+        if (bytes.len != size)
             return error.InvalidLength;
-        }
-        var dec2: [42]u8 = undefined;
-        std.mem.copy(u8, dec2[0..], bytes);
-        const self = @bitCast(PubKey, dec2);
-        if (!std.mem.eql(u8, &self.pkalg, "Ed")) {
+        const self = @bitCast(PubKey, bytes[0..size].*);
+        if (!std.mem.eql(u8, &self.pkalg, "Ed"))
             return error.UnsupportedAlgorithm;
-        }
         return self;
     }
 
