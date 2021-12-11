@@ -22,6 +22,7 @@ fn read_base64_file(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
     defer file.close();
 
     const sig_contents = try std.fs.cwd().readFileAlloc(allocator, "test/msg.sig", 4096);
+    defer allocator.free(sig_contents);
 
     std.log.info("foo {s}", .{@TypeOf(sig_contents)});
 
@@ -49,7 +50,10 @@ fn read_base64_file(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
 }
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    //const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = &gpa.allocator;
 
     const dec = try read_base64_file("test/msg.sig", allocator);
 
@@ -58,6 +62,8 @@ pub fn main() !void {
     var dec2: [74]u8 = undefined;
     std.mem.copy(u8, dec2[0..], dec);
     const sig = @bitCast(signature, dec2);
+
+    allocator.free(dec);
 
     std.log.info("pk: {s}", .{sig.pkalg});
 }
