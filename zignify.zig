@@ -6,10 +6,11 @@ const b64decoder = std.base64.standard.Decoder;
 const comment_hdr = "untrusted comment: ";
 
 const Signature = packed struct {
-    // This is always "Ed" for Ed25519.
+    /// This is always "Ed" for Ed25519.
     pkalg: [2]u8,
-    // A random 64-bit integer which is used to tell if the correct pubkey is used for verification.
+    /// A random 64-bit integer which is used to tell if the correct pubkey is used for verification.
     keynum: [8]u8,
+    /// Ed25519 signature
     sig: [Ed25519.signature_length]u8,
 
     fn from_bytes(bytes: []const u8) !Signature {
@@ -18,7 +19,11 @@ const Signature = packed struct {
         }
         var dec2: [74]u8 = undefined;
         std.mem.copy(u8, dec2[0..], bytes);
-        return @bitCast(Signature, dec2);
+        const self = @bitCast(Signature, dec2);
+        if (!std.mem.eql(u8, &self.pkalg, "Ed")) {
+            return error.UnsupportedAlgorithm;
+        }
+        return self;
     }
 
     fn from_file(path: []const u8, allocator: *std.mem.Allocator) !Signature {
@@ -39,7 +44,11 @@ const PubKey = packed struct {
         }
         var dec2: [42]u8 = undefined;
         std.mem.copy(u8, dec2[0..], bytes);
-        return @bitCast(PubKey, dec2);
+        const self = @bitCast(PubKey, dec2);
+        if (!std.mem.eql(u8, &self.pkalg, "Ed")) {
+            return error.UnsupportedAlgorithm;
+        }
+        return self;
     }
 
     fn from_file(path: []const u8, allocator: *std.mem.Allocator) !PubKey {
@@ -98,4 +107,5 @@ pub fn main() !void {
     const allocator = &gpa.allocator;
 
     try verify_file("test/key.pub", "test/message.txt", "test/msg.sig", allocator);
+    print("Signature Verified\n", .{});
 }
