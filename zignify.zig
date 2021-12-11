@@ -8,24 +8,74 @@ const comment_hdr = "untrusted comment: ";
 
 const b64decoder = std.base64.standard.Decoder;
 
-const signature = packed struct {
-// This is always "Ed" for Ed25519.
-pkalg: [2]u8,
-// A random 64-bit integer which is used to tell if the correct pubkey is used for verification.
-keynum: [8]u8, sig: [Ed25519.signature_length]u8 };
+const Signature = packed struct {
+    // This is always "Ed" for Ed25519.
+    pkalg: [2]u8,
+    // A random 64-bit integer which is used to tell if the correct pubkey is used for verification.
+    keynum: [8]u8,
+    sig: [Ed25519.signature_length]u8,
+
+    fn from_bytes(bytes: []const u8) !Signature {
+        if (bytes.len != 74) {
+            return error.InvalidLength;
+        }
+        var dec2: [74]u8 = undefined;
+        std.mem.copy(u8, dec2[0..], bytes);
+        return @bitCast(Signature, dec2);
+    }
+
+    fn from_file(path: []const u8, allocator: *std.mem.Allocator) !Signature {
+        const data = try read_base64_file(path, allocator);
+        defer allocator.free(data);
+        return from_bytes(data);
+    }
+};
+
+const PubKey = packed struct {
+    pkalg: [2]u8,
+    keynum: [8]u8,
+    pubkey: [Ed25519.public_length]u8,
+
+    fn from_bytes(bytes: []const u8) !PubKey {
+        if (bytes.len != 42) {
+            return error.InvalidLength;
+        }
+        var dec2: [42]u8 = undefined;
+        std.mem.copy(u8, dec2[0..], bytes);
+        return @bitCast(PubKey, dec2);
+    }
+
+    fn from_file(path: []const u8, allocator: *std.mem.Allocator) !PubKey {
+        const data = try read_base64_file(path, allocator);
+        defer allocator.free(data);
+        return from_bytes(data);
+    }
+};
+
+fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
+    const pubkey = try PubKey.from_file(pubkeyfile, allocator);
+    const sig = try Signature.from_file(sigfile, allocator);
+    const msg = try read_file(msgfile, 65535, allocator);
+    defer allocator.free(msg);
+    return verify_message(pubkey, sig, msg);
+}
+
+fn verify_message(pubkey: PubKey, signature: Signature, msg: []const u8) !void {
+    if (!std.mem.eql(u8, &pubkey.keynum, &signature.keynum)) {
+        return error.WrongPublicKey;
+    }
+    const r = Ed25519.verify(signature.sig, msg, pubkey.pubkey);
+    std.log.info("verify ok", .{});
+    return r;
+}
+
+fn read_file(path: []const u8, max_size: u32, allocator: *std.mem.Allocator) ![]u8 {
+    return try std.fs.cwd().readFileAlloc(allocator, path, max_size);
+}
 
 fn read_base64_file(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
-    const file = try std.fs.cwd().openFile(
-        "test/msg.sig",
-        .{ .read = true },
-    );
-    defer file.close();
-
-    const sig_contents = try std.fs.cwd().readFileAlloc(allocator, "test/msg.sig", 4096);
+    const sig_contents = try read_file(path, 4096, allocator);
     defer allocator.free(sig_contents);
-
-    std.log.info("foo {s}", .{@TypeOf(sig_contents)});
-
     var iter = std.mem.split(sig_contents, "\n");
 
     var line = iter.next().?;
@@ -44,7 +94,6 @@ fn read_base64_file(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
     std.log.info("Found base64 line: {s} (len={d}, decoded={d})", .{ line, std.mem.len(line), b64decoder.calcSizeForSlice(line) });
 
     const dec = try allocator.alloc(u8, try b64decoder.calcSizeForSlice(line));
-    //var dec: [@sizeOf(signature)]u8 = undefined;
     try b64decoder.decode(dec[0..dec.len], line);
     return dec;
 }
@@ -55,15 +104,5 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = &gpa.allocator;
 
-    const dec = try read_base64_file("test/msg.sig", allocator);
-
-    // const dec2: [74]u8 = dec[0..74];  // error: expected type '[74]u8', found '*[74]u8'
-    // const dec2: [74]u8 = dec;  // error: expected type '[74]u8', found '[]u8'
-    var dec2: [74]u8 = undefined;
-    std.mem.copy(u8, dec2[0..], dec);
-    const sig = @bitCast(signature, dec2);
-
-    allocator.free(dec);
-
-    std.log.info("pk: {s}", .{sig.pkalg});
+    try verify_file("test/key.pub", "test/message.txt", "test/msg.sig", allocator);
 }
