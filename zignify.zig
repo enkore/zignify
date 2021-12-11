@@ -14,14 +14,13 @@ pkalg: [2]u8,
 // A random 64-bit integer which is used to tell if the correct pubkey is used for verification.
 keynum: [8]u8, sig: [Ed25519.signature_length]u8 };
 
-pub fn main() !void {
+fn read_base64_file(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
     const file = try std.fs.cwd().openFile(
         "test/msg.sig",
         .{ .read = true },
     );
     defer file.close();
 
-    const allocator = std.heap.page_allocator;
     const sig_contents = try std.fs.cwd().readFileAlloc(allocator, "test/msg.sig", 4096);
 
     std.log.info("foo {s}", .{@TypeOf(sig_contents)});
@@ -33,29 +32,32 @@ pub fn main() !void {
         line = iter.next().?;
     }
 
+    const empty_line = iter.next().?;
+    if (empty_line.len > 0) {
+        return error.GarbageAtEndOfFile;
+    }
+    if (iter.next() != null) {
+        return error.GarbageAtEndOfFile;
+    }
+
     std.log.info("Found base64 line: {s} (len={d}, decoded={d})", .{ line, std.mem.len(line), b64decoder.calcSizeForSlice(line) });
 
-    //const dec = try allocator.alloc(u8, try b64decoder.calcSizeForSlice(line));
-    var dec: [@sizeOf(signature)]u8 = undefined;
+    const dec = try allocator.alloc(u8, try b64decoder.calcSizeForSlice(line));
+    //var dec: [@sizeOf(signature)]u8 = undefined;
     try b64decoder.decode(dec[0..dec.len], line);
+    return dec;
+}
 
-    std.log.info("decoded: {s}", .{dec});
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
 
-    const sig = @bitCast(signature, dec);
+    const dec = try read_base64_file("test/msg.sig", allocator);
+
+    // const dec2: [74]u8 = dec[0..74];  // error: expected type '[74]u8', found '*[74]u8'
+    // const dec2: [74]u8 = dec;  // error: expected type '[74]u8', found '[]u8'
+    var dec2: [74]u8 = undefined;
+    std.mem.copy(u8, dec2[0..], dec);
+    const sig = @bitCast(signature, dec2);
 
     std.log.info("pk: {s}", .{sig.pkalg});
-    std.log.info("pk: {s}", .{sig.keynum});
-
-    //    while (iter.next()) |line| {
-    //      std.log.info("len={s}", .{line});
-    //    if (std.mem.startsWith(u8, line, comment_hdr)) {
-    //      std.log.info("This is a comment line.", .{});
-    // }
-    //}
-
-    //var in_stream = file.reader();
-    //var buf: [1024]u8 = undefined;
-    //while (try in_stream.readUntilDelimiterOrEof(&buf, '\n')) |line| {
-    //    std.log.info("len={s}", .{buf});
-    //}
 }
