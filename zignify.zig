@@ -52,6 +52,53 @@ const PubKey = packed struct {
     }
 };
 
+const PrivateKey = packed struct {
+    pkalg: [2]u8,
+    kdfalg: [2]u8,
+    kdfrounds: u32,
+    salt: [16]u8,
+    checksum: [8]u8,
+    keynum: [8]u8,
+    seckey: [Ed25519.secret_length]u8,
+
+    fn from_bytes(bytes: []const u8) !PrivateKey {
+        const size = @sizeOf(PrivateKey);
+        if (bytes.len != size)
+            return error.InvalidLength;
+        var self = @bitCast(PrivateKey, bytes[0..size].*);
+        if (!std.mem.eql(u8, &self.pkalg, "Ed"))
+            return error.UnsupportedAlgorithm;
+        if (!std.mem.eql(u8, &self.kdfalg, "BK"))
+            return error.UnsupportedAlgorithm;
+        self.kdfrounds = network_to_host(u32, self.kdfrounds);
+        return self;
+    }
+
+    fn from_file(path: []const u8, allocator: *std.mem.Allocator) !PrivateKey {
+        const data = try read_base64_file(path, allocator);
+        defer allocator.free(data);
+        return from_bytes(data);
+    }
+
+    fn decrypt(self: PrivateKey, passphrase: []const u8) !void {
+    }
+};
+
+fn host_to_network(comptime T: type, value: T) T {
+    return switch (endian) {
+        .Big => value,
+        .Little => @byteSwap(T, value),
+    };
+}
+
+const network_to_host = host_to_network;
+
+fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
+    const seckey = try PrivatKey.from_file(seckeyfile, allocator);
+    const msg = try read_file(msgfile, 65535, allocator);
+    defer allocator.free(msg);
+}
+
 fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
     const pubkey = try PubKey.from_file(pubkeyfile, allocator);
     const sig = try Signature.from_file(sigfile, allocator);
@@ -100,6 +147,8 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = &gpa.allocator;
 
-    try verify_file("test/key.pub", "test/message.txt", "test/msg.sig", allocator);
-    print("Signature Verified\n", .{});
+    try sign_file("test/key.sec", "test/message.txt", "test/msg.sig", allocator);
+
+    //    try verify_file("test/key.pub", "test/message.txt", "test/msg.sig", allocator);
+    //    print("Signature Verified\n", .{});
 }
