@@ -10,40 +10,26 @@ const bcrypt_pbkdf = @import("bcrypt_pbkdf.zig").bcrypt_pbkdf;
 
 const comment_hdr = "untrusted comment: ";
 
-fn serializable(comptime T: type) type {
-    const SerializableT = packed struct {
-        usingnamespace T;
-
-        fn from_bytes(bytes: []const u8) !SerializableT {
-            const size = @sizeOf(SerializableT);
-            if (bytes.len != size)
-                return error.InvalidLength;
-            const self = @bitCast(SerializableT, bytes[0..size].*);
-            try self.check();
-            return self;
-        }
-
-        fn from_file(path: []const u8, allocator: *std.mem.Allocator) !SerializableT {
-            const data = try read_base64_file(path, allocator);
-            defer allocator.free(data);
-            return from_bytes(data);
-        }
-
-        fn as_bytes(self: SerializableT) []const u8 {
-            return @bitCast([@sizeOf(SerializableT)]u8, self)[0..];
-        }
-    };
-    @compileLog("ser", @typeInfo(T).Struct.fields);
-    //comptime var i = 0;
-    //while (i < @memberCount(SerializableT)) : (i += 1) {
-    //   const x = @field(SerializableT, @memberName(SerializableT, i));
-    //  @compileLog(SerializableT, @memberName(SerializableT, i), @typeInfo(x));
-    //}
-
-    return SerializableT;
+fn from_bytes(comptime T: type, bytes: []const u8) !T {
+    const size = @sizeOf(T);
+    if (bytes.len != size)
+        return error.InvalidLength;
+    var self = @bitCast(T, bytes[0..size].*);
+    try self.check();
+    return self;
 }
 
-const Signature = serializable(packed struct {
+fn from_file(comptime T: type, path: []const u8, allocator: *std.mem.Allocator) !T {
+    const data = try read_base64_file(path, allocator);
+    defer allocator.free(data);
+    return from_bytes(T, data);
+}
+
+fn as_bytes(self: anytype) []const u8 {
+    return @bitCast([@sizeOf(@TypeOf(self))]u8, self)[0..];
+}
+
+const Signature = packed struct {
     /// This is always "Ed" for Ed25519.
     pkalg: [2]u8,
     /// A random 64-bit integer which is used to tell if the correct pubkey is used for verification.
@@ -55,27 +41,16 @@ const Signature = serializable(packed struct {
         if (!std.mem.eql(u8, &self.pkalg, "Ed"))
             return error.UnsupportedAlgorithm;
     }
-});
+};
 
 const PubKey = packed struct {
     pkalg: [2]u8,
     keynum: [8]u8,
     pubkey: [Ed25519.public_length]u8,
 
-    fn from_bytes(bytes: []const u8) !PubKey {
-        const size = @sizeOf(PubKey);
-        if (bytes.len != size)
-            return error.InvalidLength;
-        const self = @bitCast(PubKey, bytes[0..size].*);
+    fn check(self: PubKey) !void {
         if (!std.mem.eql(u8, &self.pkalg, "Ed"))
             return error.UnsupportedAlgorithm;
-        return self;
-    }
-
-    fn from_file(path: []const u8, allocator: *std.mem.Allocator) !PubKey {
-        const data = try read_base64_file(path, allocator);
-        defer allocator.free(data);
-        return from_bytes(data);
     }
 };
 
@@ -93,23 +68,12 @@ const PrivateKey = packed struct {
     /// Ed25519 private key XORed with output of bcrypt_pbkdf (or nulls, if kdfrounds=0).
     seckey: [Ed25519.secret_length]u8,
 
-    fn from_bytes(bytes: []const u8) !PrivateKey {
-        const size = @sizeOf(PrivateKey);
-        if (bytes.len != size)
-            return error.InvalidLength;
-        var self = @bitCast(PrivateKey, bytes[0..size].*);
+    fn check(self: *PrivateKey) !void {
         if (!std.mem.eql(u8, &self.pkalg, "Ed"))
             return error.UnsupportedAlgorithm;
         if (!std.mem.eql(u8, &self.kdfalg, "BK"))
             return error.UnsupportedAlgorithm;
         self.kdfrounds = network_to_host(u32, self.kdfrounds);
-        return self;
-    }
-
-    fn from_file(path: []const u8, allocator: *std.mem.Allocator) !PrivateKey {
-        const data = try read_base64_file(path, allocator);
-        defer allocator.free(data);
-        return from_bytes(data);
     }
 
     fn decrypt(self: PrivateKey, passphrase: []const u8) !PrivateKey {
@@ -140,17 +104,17 @@ fn host_to_network(comptime T: type, value: T) T {
 const network_to_host = host_to_network;
 
 fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
-    const encseckey = try PrivateKey.from_file(seckeyfile, allocator);
+    const encseckey = try from_file(PrivateKey, seckeyfile, allocator);
     const msg = try read_file(msgfile, 65535, allocator);
     defer allocator.free(msg);
     const seckey = try encseckey.decrypt("");
     const signature = try sign_message(seckey, msg);
-    try write_base64_file(sigfile, "no comment", signature.as_bytes(), allocator);
+    try write_base64_file(sigfile, "no comment", as_bytes(signature), allocator);
 }
 
 fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
-    const pubkey = try PubKey.from_file(pubkeyfile, allocator);
-    const sig = try Signature.from_file(sigfile, allocator);
+    const pubkey = try from_file(PubKey, pubkeyfile, allocator);
+    const sig = try from_file(Signature, sigfile, allocator);
     const msg = try read_file(msgfile, 65535, allocator);
     defer allocator.free(msg);
     return verify_message(pubkey, sig, msg);
@@ -221,6 +185,6 @@ pub fn main() !void {
 
     try sign_file("test/key.sec", "test/message.txt", "test/msg.sig", allocator);
 
-    //    try verify_file("test/key.pub", "test/message.txt", "test/msg.sig", allocator);
-    //    print("Signature Verified\n", .{});
+    try verify_file("test/key.pub", "test/message.txt", "test/msg.sig", allocator);
+    print("Signature Verified\n", .{});
 }
