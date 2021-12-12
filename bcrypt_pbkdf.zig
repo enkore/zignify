@@ -1,6 +1,3 @@
-const impl = @cImport({
-    @cInclude("pycabcrypt.h");
-});
 const std = @import("std");
 const debug = std.debug;
 const SHA512 = std.crypto.hash.sha2.Sha512;
@@ -46,7 +43,11 @@ fn bcrypt_hash(sha2pass: []const u8, sha2salt: []const u8, out: []u8) void {
 
     // ZAP
     zero(u32, &cdata);
-    //zero(Blowfish, state);
+    zerosingle(&state);
+}
+
+fn zerosingle(obj: anytype) void {
+    zero(@TypeOf(obj.*), @as(*[1]@TypeOf(obj.*), obj));
 }
 
 pub fn bcrypt_pbkdf(passphrase: []const u8, salt: []const u8, key: []u8, rounds: u32) !void {
@@ -81,10 +82,10 @@ pub fn bcrypt_pbkdf(passphrase: []const u8, salt: []const u8, key: []u8, rounds:
 
         // first round, salt is the salt given to us
         var ctx = SHA512.init(.{});
+        defer zerosingle(&ctx);
         ctx.update(salt);
         ctx.update(countsalt[0..]);
         ctx.final(&sha2salt);
-        //zero(SHA512, ctx);
         bcrypt_hash(&sha2pass, &sha2salt, &tmpout);
         std.mem.copy(u8, &out, &tmpout);
 
@@ -113,9 +114,6 @@ pub fn bcrypt_pbkdf(passphrase: []const u8, salt: []const u8, key: []u8, rounds:
     }
 
     zero(u8, &out);
-
-    //if (impl.bcrypt_pbkdf(passphrase.ptr, passphrase.len, salt.ptr, salt.len, key.ptr, key.len, rounds) != 0)
-    //    return error.BCryptError;
 }
 
 /// This is std.crypto.pwhash.bcrypt.State, which is private.
