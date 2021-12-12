@@ -1,7 +1,13 @@
 const std = @import("std");
 const print = std.debug.print;
 const Ed25519 = std.crypto.sign.Ed25519;
+const bcrypt = std.crypto.pwhash.bcrypt;
+const pbkdf2 = std.crypto.pwhash.pbkdf2;
 const b64decoder = std.base64.standard.Decoder;
+const b64encoder = std.base64.standard.Encoder;
+const endian = @import("builtin").target.cpu.arch.endian();
+
+const bcrypt_pbkdf = @import("bcrypt_pbkdf.zig").bcrypt_pbkdf;
 
 const comment_hdr = "untrusted comment: ";
 
@@ -27,6 +33,10 @@ const Signature = packed struct {
         const data = try read_base64_file(path, allocator);
         defer allocator.free(data);
         return from_bytes(data);
+    }
+
+    fn as_bytes(self: Signature) []const u8 {
+        return @bitCast([@sizeOf(Signature)]u8, self)[0..];
     }
 };
 
@@ -80,7 +90,15 @@ const PrivateKey = packed struct {
         return from_bytes(data);
     }
 
-    fn decrypt(self: PrivateKey, passphrase: []const u8) !void {
+    fn decrypt(self: PrivateKey, passphrase: []const u8) !PrivateKey {
+        var xorkey: [Ed25519.secret_length]u8 = undefined;
+        var enckey: [Ed25519.secret_length]u8 = self.seckey;
+        if (self.kdfrounds == 0)
+            return self;
+        try bcrypt_pbkdf(passphrase, self.salt[0..], xorkey[0..], self.kdfrounds);
+        for (xorkey) |keybyte, index|
+            enckey[index] ^= keybyte;
+        return PrivateKey{ .pkalg = self.pkalg, .kdfalg = self.kdfalg, .kdfrounds = self.kdfrounds, .salt = self.salt, .checksum = self.checksum, .keynum = self.keynum, .seckey = enckey };
     }
 };
 
@@ -94,9 +112,12 @@ fn host_to_network(comptime T: type, value: T) T {
 const network_to_host = host_to_network;
 
 fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
-    const seckey = try PrivatKey.from_file(seckeyfile, allocator);
+    const encseckey = try PrivateKey.from_file(seckeyfile, allocator);
     const msg = try read_file(msgfile, 65535, allocator);
     defer allocator.free(msg);
+    const seckey = try encseckey.decrypt("");
+    const signature = try sign_message(seckey, msg);
+    try write_base64_file(sigfile, "no comment", signature.as_bytes(), allocator);
 }
 
 fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
@@ -112,6 +133,12 @@ fn verify_message(pubkey: PubKey, signature: Signature, msg: []const u8) !void {
         return error.WrongPublicKey;
     }
     return Ed25519.verify(signature.sig, msg, pubkey.pubkey);
+}
+
+fn sign_message(privatekey: PrivateKey, msg: []const u8) !Signature {
+    const keypair = Ed25519.KeyPair.fromSecretKey(privatekey.seckey);
+    const sig = try Ed25519.sign(msg, keypair, null);
+    return Signature{ .pkalg = "Ed".*, .keynum = privatekey.keynum, .sig = sig };
 }
 
 fn read_file(path: []const u8, max_size: u32, allocator: *std.mem.Allocator) ![]u8 {
@@ -139,6 +166,23 @@ fn read_base64_file(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
     const dec = try allocator.alloc(u8, try b64decoder.calcSizeForSlice(line));
     try b64decoder.decode(dec[0..dec.len], line);
     return dec;
+}
+
+fn write_base64_file(path: []const u8, comment: []const u8, data: []const u8, allocator: *std.mem.Allocator) !void {
+    var encode_buf = try allocator.alloc(u8, b64encoder.calcSize(data.len));
+    defer allocator.free(encode_buf);
+    const encoded = b64encoder.encode(encode_buf, data);
+
+    const file = try std.fs.cwd().createFile(
+        path,
+        .{ .truncate = true },
+    );
+    defer file.close();
+    try file.writeAll(comment_hdr);
+    try file.writeAll(comment);
+    try file.writeAll("\n");
+    try file.writeAll(encoded);
+    try file.writeAll("\n");
 }
 
 pub fn main() !void {
