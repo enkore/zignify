@@ -1,8 +1,7 @@
 const std = @import("std");
 const print = std.debug.print;
 const Ed25519 = std.crypto.sign.Ed25519;
-const bcrypt = std.crypto.pwhash.bcrypt;
-const pbkdf2 = std.crypto.pwhash.pbkdf2;
+const SHA512 = std.crypto.hash.sha2.Sha512;
 const b64decoder = std.base64.standard.Decoder;
 const b64encoder = std.base64.standard.Encoder;
 const endian = @import("builtin").target.cpu.arch.endian();
@@ -64,11 +63,16 @@ const PubKey = packed struct {
 
 const PrivateKey = packed struct {
     pkalg: [2]u8,
+    /// BK = bcrypt_pbkdf
     kdfalg: [2]u8,
+    /// Number of bcrypt_pbkdf rounds, but if 0, skip bcrypt entirely (no passphrase)
     kdfrounds: u32,
+    /// bcrypt salt
     salt: [16]u8,
+    /// first eight bytes of the SHA-512 hash of the *decrypted* private key
     checksum: [8]u8,
     keynum: [8]u8,
+    /// Ed25519 private key XORed with output of bcrypt_pbkdf (or nulls, if kdfrounds=0).
     seckey: [Ed25519.secret_length]u8,
 
     fn from_bytes(bytes: []const u8) !PrivateKey {
@@ -98,6 +102,12 @@ const PrivateKey = packed struct {
         try bcrypt_pbkdf(passphrase, self.salt[0..], xorkey[0..], self.kdfrounds);
         for (xorkey) |keybyte, index|
             enckey[index] ^= keybyte;
+
+        var key_digest: [SHA512.digest_length]u8 = undefined;
+        SHA512.hash(&enckey, &key_digest, .{});
+        if (!std.mem.eql(u8, key_digest[0..8], &self.checksum))
+            return error.WrongPassphrase;
+
         return PrivateKey{ .pkalg = self.pkalg, .kdfalg = self.kdfalg, .kdfrounds = self.kdfrounds, .salt = self.salt, .checksum = self.checksum, .keynum = self.keynum, .seckey = enckey };
     }
 };
