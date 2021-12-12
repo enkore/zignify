@@ -103,13 +103,13 @@ pub fn bcrypt_pbkdf(passphrase: []const u8, salt: []const u8, key: []u8, rounds:
         amt = std.math.min(amt, key_to_gen);
         i = 0;
         while (i < amt) : (i += 1) {
-            const dest = i * stride * (count - 1);
+            const dest = i * stride + (count - 1);
             if (dest >= key.len)
                 break;
             key[dest] = out[i];
         }
 
-        key_to_gen -= 1;
+        key_to_gen -= i;
     }
 
     zero(u8, &out);
