@@ -10,7 +10,40 @@ const bcrypt_pbkdf = @import("bcrypt_pbkdf.zig").bcrypt_pbkdf;
 
 const comment_hdr = "untrusted comment: ";
 
-const Signature = packed struct {
+fn serializable(comptime T: type) type {
+    const SerializableT = packed struct {
+        usingnamespace T;
+
+        fn from_bytes(bytes: []const u8) !SerializableT {
+            const size = @sizeOf(SerializableT);
+            if (bytes.len != size)
+                return error.InvalidLength;
+            const self = @bitCast(SerializableT, bytes[0..size].*);
+            try self.check();
+            return self;
+        }
+
+        fn from_file(path: []const u8, allocator: *std.mem.Allocator) !SerializableT {
+            const data = try read_base64_file(path, allocator);
+            defer allocator.free(data);
+            return from_bytes(data);
+        }
+
+        fn as_bytes(self: SerializableT) []const u8 {
+            return @bitCast([@sizeOf(SerializableT)]u8, self)[0..];
+        }
+    };
+    @compileLog("ser", @typeInfo(T).Struct.fields);
+    //comptime var i = 0;
+    //while (i < @memberCount(SerializableT)) : (i += 1) {
+    //   const x = @field(SerializableT, @memberName(SerializableT, i));
+    //  @compileLog(SerializableT, @memberName(SerializableT, i), @typeInfo(x));
+    //}
+
+    return SerializableT;
+}
+
+const Signature = serializable(packed struct {
     /// This is always "Ed" for Ed25519.
     pkalg: [2]u8,
     /// A random 64-bit integer which is used to tell if the correct pubkey is used for verification.
@@ -18,26 +51,11 @@ const Signature = packed struct {
     /// Ed25519 signature
     sig: [Ed25519.signature_length]u8,
 
-    fn from_bytes(bytes: []const u8) !Signature {
-        const size = @sizeOf(Signature);
-        if (bytes.len != size)
-            return error.InvalidLength;
-        const self = @bitCast(Signature, bytes[0..size].*);
+    fn check(self: Signature) !void {
         if (!std.mem.eql(u8, &self.pkalg, "Ed"))
             return error.UnsupportedAlgorithm;
-        return self;
     }
-
-    fn from_file(path: []const u8, allocator: *std.mem.Allocator) !Signature {
-        const data = try read_base64_file(path, allocator);
-        defer allocator.free(data);
-        return from_bytes(data);
-    }
-
-    fn as_bytes(self: Signature) []const u8 {
-        return @bitCast([@sizeOf(Signature)]u8, self)[0..];
-    }
-};
+});
 
 const PubKey = packed struct {
     pkalg: [2]u8,
