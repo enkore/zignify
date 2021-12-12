@@ -357,10 +357,10 @@ test "PyCA/bcrypt test vectors" {
 
     const allocator = std.heap.page_allocator;
 
-    // for (vectors) |vector| {
-    //     var key = try allocator.alloc(u8, vector.key.len);
-    //     defer allocator.free(key);
-    //     try bcrypt_pbkdf(vector.passphrase, vector.salt, key, vector.rounds);
-    //     try expect(std.mem.eql(u8, key, vector.key));
-    // }
+    for (vectors) |vector| {
+        var key = try allocator.alloc(u8, vector.key.len);
+        defer allocator.free(key);
+        try bcrypt_pbkdf(vector.passphrase, vector.salt, key, vector.rounds);
+        try expect(std.mem.eql(u8, key, vector.key));
+    }
 }
