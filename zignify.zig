@@ -5,6 +5,7 @@ const SHA512 = std.crypto.hash.sha2.Sha512;
 const b64decoder = std.base64.standard.Decoder;
 const b64encoder = std.base64.standard.Encoder;
 const endian = @import("builtin").target.cpu.arch.endian();
+const getopt = @import("getopt.zig");
 
 const bcrypt_pbkdf = @import("bcrypt_pbkdf.zig").bcrypt_pbkdf;
 
@@ -177,11 +178,85 @@ fn write_base64_file(path: []const u8, comment: []const u8, data: []const u8, al
     try file.writeAll("\n");
 }
 
+fn usage() void {
+    print(
+        \\usage: example [-a arg] [-hv]
+        \\
+    , .{});
+}
+
 pub fn main() !void {
     //const allocator = std.heap.page_allocator;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = &gpa.allocator;
+
+    var arg: []const u8 = undefined;
+
+    const Operation = enum {
+        Generate,
+        Sign,
+        Verify,
+        VerifyList,
+    };
+
+    var operation: ?Operation = null;
+    var embedded = false;
+    var comment: ?[]const u8 = null;
+    var msgfile: ?[]const u8 = null;
+    var pubkeyfile: ?[]const u8 = null;
+    var seckeyfile: ?[]const u8 = null;
+    var sigfile: ?[]const u8 = null;
+
+    var opts = getopt.getopt("CGSVhec:m:p:s:x:");
+    while (opts.next()) |maybe_opt| {
+        if (maybe_opt) |opt| {
+            switch (opt.opt) {
+                // Verify signed checksum list, then verify checksum of each listed file
+                'C' => {
+                    if (operation != null)
+                        return usage();
+                    operation = .VerifyList;
+                },
+                // Generate key pair
+                'G' => {
+                    if (operation != null)
+                        return usage();
+                    operation = .Generate;
+                },
+                // Sign message
+                'S' => {
+                    if (operation != null)
+                        return usage();
+                    operation = .Sign;
+                },
+                // Verify message
+                'V' => {
+                    if (operation != null)
+                        return usage();
+                    operation = .Verify;
+                },
+                'h' => return usage(),
+                'e' => embedded = true,
+                'c' => comment = opt.arg.?,
+                'm' => msgfile = opt.arg.?,
+                'p' => pubkeyfile = opt.arg.?,
+                's' => seckeyfile = opt.arg.?,
+                'x' => sigfile = opt.arg.?,
+                else => unreachable,
+            }
+        } else break;
+    } else |err| {
+        switch (err) {
+            getopt.Error.InvalidOption => print("invalid option: {c}\n", .{opts.optopt}),
+            getopt.Error.MissingArgument => print("option requires an argument: {c}\n", .{opts.optopt}),
+        }
+        return;
+    }
+
+    if (operation == null) {
+        return usage();
+    }
 
     try sign_file("test/key.sec", "test/message.txt", "test/msg.sig", allocator);
 
