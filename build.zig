@@ -19,6 +19,7 @@ pub fn build(b: *std.build.Builder) void {
     const test_step = b.step("test", "Runs the test suite");
     {
         const test_suite = b.addTest("bcrypt_pbkdf.zig");
+        test_suite.setBuildMode(mode);
         test_step.dependOn(&test_suite.step);
     }
 
