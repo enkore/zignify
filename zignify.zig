@@ -178,21 +178,7 @@ fn write_base64_file(path: []const u8, comment: []const u8, data: []const u8, al
     try file.writeAll("\n");
 }
 
-fn usage() void {
-    print(
-        \\usage: example [-a arg] [-hv]
-        \\
-    , .{});
-}
-
-pub fn main() !void {
-    //const allocator = std.heap.page_allocator;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = &gpa.allocator;
-
-    var arg: []const u8 = undefined;
-
+const Args = struct {
     const Operation = enum {
         Generate,
         Sign,
@@ -200,64 +186,81 @@ pub fn main() !void {
         VerifyList,
     };
 
-    var operation: ?Operation = null;
-    var embedded = false;
-    var comment: ?[]const u8 = null;
-    var msgfile: ?[]const u8 = null;
-    var pubkeyfile: ?[]const u8 = null;
-    var seckeyfile: ?[]const u8 = null;
-    var sigfile: ?[]const u8 = null;
+    operation: ?Operation = null,
+    embedded: bool = false,
+    comment: ?[]const u8 = null,
+    msgfile: ?[]const u8 = null,
+    pubkeyfile: ?[]const u8 = null,
+    seckeyfile: ?[]const u8 = null,
+    sigfile: ?[]const u8 = null,
 
-    var opts = getopt.getopt("CGSVhec:m:p:s:x:");
-    while (opts.next()) |maybe_opt| {
-        if (maybe_opt) |opt| {
-            switch (opt.opt) {
-                // Verify signed checksum list, then verify checksum of each listed file
-                'C' => {
-                    if (operation != null)
-                        return usage();
-                    operation = .VerifyList;
-                },
-                // Generate key pair
-                'G' => {
-                    if (operation != null)
-                        return usage();
-                    operation = .Generate;
-                },
-                // Sign message
-                'S' => {
-                    if (operation != null)
-                        return usage();
-                    operation = .Sign;
-                },
-                // Verify message
-                'V' => {
-                    if (operation != null)
-                        return usage();
-                    operation = .Verify;
-                },
-                'h' => return usage(),
-                'e' => embedded = true,
-                'c' => comment = opt.arg.?,
-                'm' => msgfile = opt.arg.?,
-                'p' => pubkeyfile = opt.arg.?,
-                's' => seckeyfile = opt.arg.?,
-                'x' => sigfile = opt.arg.?,
-                else => unreachable,
+    const Usage = error{Usage};
+
+    fn usage() Usage!void {
+        print(
+            \\usage: example [-a arg] [-hv]
+            \\
+        , .{});
+        return error.Usage;
+    }
+
+    fn set_op(self: *Args, operation: Operation) Usage!void {
+        if (self.operation != null)
+            return usage();
+        self.operation = operation;
+    }
+
+    fn parse_cmdline() Usage!Args {
+        var opts = getopt.getopt("GSVChec:m:p:s:x:");
+        var self = Args{};
+        while (opts.next()) |maybe_opt| {
+            if (maybe_opt) |opt| {
+                switch (opt.opt) {
+                    // Generate key pair
+                    'G' => try self.set_op(.Generate),
+                    // Sign message
+                    'S' => try self.set_op(.Sign),
+                    // Verify message
+                    'V' => try self.set_op(.Verify),
+                    // Verify signed checksum list, then verify checksum of each listed file
+                    'C' => try self.set_op(.VerifyList),
+                    // Flags
+                    'h' => try usage(),
+                    'e' => self.embedded = true,
+                    'c' => self.comment = opt.arg.?,
+                    'm' => self.msgfile = opt.arg.?,
+                    'p' => self.pubkeyfile = opt.arg.?,
+                    's' => self.seckeyfile = opt.arg.?,
+                    'x' => self.sigfile = opt.arg.?,
+                    else => unreachable,
+                }
+            } else break;
+        } else |err| {
+            switch (err) {
+                getopt.Error.InvalidOption => print("invalid option: -{c}\n", .{opts.optopt}),
+                getopt.Error.MissingArgument => print("option requires an argument: -{c}\n", .{opts.optopt}),
             }
-        } else break;
-    } else |err| {
-        switch (err) {
-            getopt.Error.InvalidOption => print("invalid option: {c}\n", .{opts.optopt}),
-            getopt.Error.MissingArgument => print("option requires an argument: {c}\n", .{opts.optopt}),
+            return error.Usage;
         }
-        return;
+        if (self.operation == null)
+            try usage();
+        return self;
     }
+};
 
-    if (operation == null) {
-        return usage();
+pub fn main() !void {
+    //const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = &gpa.allocator;
+
+    const args = Args.parse_cmdline() catch std.os.exit(1);
+    switch (args.operation.?) {
+        .Generate => unreachable,
+        .Sign => unreachable,
+        .Verify => unreachable,
+        .VerifyList => unreachable,
     }
-
     try sign_file("test/key.sec", "test/message.txt", "test/msg.sig", allocator);
 
     try verify_file("test/key.pub", "test/message.txt", "test/msg.sig", allocator);
