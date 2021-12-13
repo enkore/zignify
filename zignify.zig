@@ -198,9 +198,12 @@ const Args = struct {
 
     fn usage() Usage!void {
         print(
-            \\usage: example [-a arg] [-hv]
+            \\usage: {0s} -G [-c comment] -p pubkey -s seckey
+            \\       {0s} -S [-e] [-x sigfile] -s seckey -m message
+            \\       {0s} -V [-e] -p pubkey [-x sigfile] -m message
+            \\       {0s} -C -p pubkey -x sigfile
             \\
-        , .{});
+        , .{std.fs.path.basename(std.mem.spanZ(std.os.argv[0]))});
         return error.Usage;
     }
 
