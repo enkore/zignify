@@ -128,6 +128,39 @@ fn verify_message(pubkey: PubKey, signature: Signature, msg: []const u8) !void {
     return Ed25519.verify(signature.sig, msg, pubkey.pubkey);
 }
 
+fn secure_random(comptime nbytes: u32) [nbytes]u8 {
+    var ret: [nbytes]u8 = undefined;
+    std.crypto.random.bytes(&ret);
+    return ret;
+}
+
+fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, passphrase: []const u8, allocator: *std.mem.Allocator) !void {
+    const keypair = try Ed25519.KeyPair.create(null); // null seed means random
+    const checksum = checksum: {
+        var key_digest: [SHA512.digest_length]u8 = undefined;
+        SHA512.hash(&keypair.secret_key, &key_digest, .{});
+        break :checksum key_digest[0..8];
+    };
+    // TODO key encryption for passphrase.len>0
+    const salt: [16]u8 = secure_random(16);
+    const pubkey = PubKey{
+        .pkalg = "Ed".*,
+        .keynum = secure_random(8),
+        .pubkey = keypair.public_key,
+    };
+    const seckey = PrivateKey{
+        .pkalg = "Ed".*,
+        .kdfalg = "BK".*,
+        .kdfrounds = if (passphrase.len > 0) 42 else 0, // 42 rounds is used by signify
+        .salt = salt,
+        .checksum = checksum.*,
+        .keynum = pubkey.keynum,
+        .seckey = keypair.secret_key,
+    };
+    try write_base64_file(seckeyfile, "no comment", as_bytes(seckey), allocator);
+    try write_base64_file(pubkeyfile, "no comment", as_bytes(pubkey), allocator);
+}
+
 fn sign_message(privatekey: PrivateKey, msg: []const u8) !Signature {
     const keypair = Ed25519.KeyPair.fromSecretKey(privatekey.seckey);
     const sig = try Ed25519.sign(msg, keypair, null);
@@ -276,7 +309,7 @@ pub fn main() !void {
     defer if (default_sigfile) |df| allocator.free(df); // so unconditional defer, conditional free
 
     switch (args.operation.?) {
-        .Generate => unreachable,
+        .Generate => try generate_key(args.pubkeyfile.?, args.seckeyfile.?, "", allocator),
         .Sign => {
             try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, allocator);
         },
