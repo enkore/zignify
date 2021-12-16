@@ -247,6 +247,12 @@ const Args = struct {
         }
         if (self.operation == null)
             try usage();
+        switch (self.operation.?) {
+            .Generate => if (self.seckeyfile == null or self.pubkeyfile == null) try usage(),
+            .Sign => if (self.seckeyfile == null or self.msgfile == null) try usage(),
+            .Verify => if (self.pubkeyfile == null or self.msgfile == null) try usage(),
+            .VerifyList => if (self.pubkeyfile == null or self.sigfile == null) try usage(),
+        }
         return self;
     }
 };
@@ -258,14 +264,33 @@ pub fn main() !void {
     const allocator = &gpa.allocator;
 
     const args = Args.parse_cmdline() catch std.os.exit(1);
+    // if (args.msgfile != null and args.sigfile == null) {
+    //     args.sigfile = try std.mem.concat(allocator, u8, &[_][]const u8{ args.msgfile.?, ".sig" });
+    //     defer allocator.free(args.sigfile.?);
+    // } // scope ends here, so UAF ensues
+
+    const default_sigfile = if (args.msgfile) |msgfile|
+        try std.mem.concat(allocator, u8, &[_][]const u8{ msgfile, ".sig" })
+    else
+        null;
+    defer if (default_sigfile) |df| allocator.free(df); // so unconditional defer, conditional free
+
     switch (args.operation.?) {
         .Generate => unreachable,
-        .Sign => unreachable,
-        .Verify => unreachable,
+        .Sign => {
+            try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, allocator);
+        },
+        .Verify => {
+            if (verify_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, allocator)) {
+                print("Signature verified\n", .{});
+            } else |err| switch (err) {
+                error.SignatureVerificationFailed => {
+                    print("Signature verification failed\n", .{});
+                    std.os.exit(1);
+                },
+                else => return err,
+            }
+        },
         .VerifyList => unreachable,
     }
-    try sign_file("test/key.sec", "test/message.txt", "test/msg.sig", allocator);
-
-    try verify_file("test/key.pub", "test/message.txt", "test/msg.sig", allocator);
-    print("Signature Verified\n", .{});
 }
