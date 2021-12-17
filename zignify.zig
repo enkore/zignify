@@ -110,7 +110,10 @@ fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, a
     defer allocator.free(msg);
     const seckey = try encseckey.decrypt("");
     const signature = try sign_message(seckey, msg);
-    try write_base64_file(sigfile, "no comment", as_bytes(signature), allocator);
+    const keyname = std.fs.path.basename(seckeyfile);
+    const comment = try std.mem.concat(allocator, u8, &[_][]const u8{ "verify with ", keyname[0 .. keyname.len - 3], "pub" });
+    defer allocator.free(comment);
+    try write_base64_file(sigfile, comment, as_bytes(signature), allocator);
 }
 
 fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
@@ -157,8 +160,8 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, passphrase: []co
         .keynum = pubkey.keynum,
         .seckey = keypair.secret_key,
     };
-    try write_base64_file(seckeyfile, "no comment", as_bytes(seckey), allocator);
-    try write_base64_file(pubkeyfile, "no comment", as_bytes(pubkey), allocator);
+    try write_base64_file(seckeyfile, "signify secret key", as_bytes(seckey), allocator);
+    try write_base64_file(pubkeyfile, "signify public key", as_bytes(pubkey), allocator);
 }
 
 fn sign_message(privatekey: PrivateKey, msg: []const u8) !Signature {
