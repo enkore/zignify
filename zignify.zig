@@ -289,6 +289,20 @@ const Args = struct {
             .Verify => if (self.pubkeyfile == null or self.msgfile == null) try usage(),
             .VerifyList => if (self.pubkeyfile == null or self.sigfile == null) try usage(),
         }
+        if (self.seckeyfile) |secname| {
+            if (!std.mem.endsWith(u8, secname, ".sec")) {
+                print("key files need to be named keyname.pub and keyname.sec\n", .{});
+                return error.Usage;
+            }
+            if (self.pubkeyfile) |pubname| {
+                if (!std.mem.endsWith(u8, pubname, ".pub") or
+                    !std.mem.eql(u8, secname[0 .. secname.len - 3], pubname[0 .. pubname.len - 3]))
+                {
+                    print("key files need to be named keyname.pub and keyname.sec\n", .{});
+                    return error.Usage;
+                }
+            }
+        }
         return self;
     }
 };
