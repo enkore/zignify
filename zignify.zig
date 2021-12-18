@@ -7,55 +7,21 @@ const getpass = @import("getpass.zig");
 
 const ExitError = error.ExitError;
 
-fn decrypt_secret_key(seckey: *const impl.PrivateKey) !impl.PrivateKey {
-    if (seckey.kdfrounds == 0) {
-        return seckey.*;
-    } else {
-        var pwstor: [1024]u8 = undefined;
-        defer zero(u8, &pwstor);
-        const passphrase = try getpass.getpass("Passphrase: ", &pwstor);
-        return try seckey.decrypt(passphrase);
-    }
-}
+pub fn main() !void {
+    //const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = &gpa.allocator;
 
-fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, allocator: *std.mem.Allocator) !void {
-    var pwstor: [1024]u8 = undefined;
-    defer zero(u8, &pwstor);
-    const passphrase = if (encrypt)
-        getpass.getpass("Passphrase for new key: ", &pwstor) catch |err| switch (err) {
-            getpass.NoPassphraseGiven => {
-                print("If you wish to not encrypt the key, use the -n switch,\n", .{});
-                return ExitError;
-            },
+    const args = Args.parse_cmdline() catch std.os.exit(1);
+    args.run(allocator) catch |err| {
+        switch (err) {
+            getpass.PassphraseTooLong => print("The given passphrase is too long.\n", .{}),
+            ExitError => {},
             else => return err,
         }
-    else
-        "";
-
-    const pair = try impl.generate_keypair(passphrase);
-    try impl.write_base64_file(seckeyfile, "signify secret key", impl.as_bytes(pair.seckey), allocator);
-    try impl.write_base64_file(pubkeyfile, "signify public key", impl.as_bytes(pair.pubkey), allocator);
-}
-
-fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
-    const encseckey = impl.from_file(impl.PrivateKey, seckeyfile, allocator) catch |err| return handle_file_error(seckeyfile, err);
-    const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
-    defer allocator.free(msg);
-    var seckey = try decrypt_secret_key(&encseckey);
-    defer impl.zerosingle(&seckey);
-    const signature = try impl.sign_message(seckey, msg);
-    const keyname = std.fs.path.basename(seckeyfile);
-    const comment = try std.mem.concat(allocator, u8, &[_][]const u8{ "verify with ", keyname[0 .. keyname.len - 3], "pub" });
-    defer allocator.free(comment);
-    try impl.write_base64_file(sigfile, comment, impl.as_bytes(signature), allocator);
-}
-
-fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
-    const pubkey = impl.from_file(impl.PubKey, pubkeyfile, allocator) catch |err| return handle_file_error(pubkeyfile, err);
-    const sig = impl.from_file(impl.Signature, sigfile, allocator) catch |err| return handle_file_error(sigfile, err);
-    const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
-    defer allocator.free(msg);
-    return impl.verify_message(pubkey, sig, msg);
+        std.os.exit(1);
+    };
 }
 
 const Args = struct {
@@ -178,6 +144,57 @@ const Args = struct {
     }
 };
 
+fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, allocator: *std.mem.Allocator) !void {
+    var pwstor: [1024]u8 = undefined;
+    defer zero(u8, &pwstor);
+    const passphrase = if (encrypt)
+        getpass.getpass("Passphrase for new key: ", &pwstor) catch |err| switch (err) {
+            getpass.NoPassphraseGiven => {
+                print("If you wish to not encrypt the key, use the -n switch,\n", .{});
+                return ExitError;
+            },
+            else => return err,
+        }
+    else
+        "";
+
+    const pair = try impl.generate_keypair(passphrase);
+    try impl.write_base64_file(seckeyfile, "signify secret key", impl.as_bytes(pair.seckey), allocator);
+    try impl.write_base64_file(pubkeyfile, "signify public key", impl.as_bytes(pair.pubkey), allocator);
+}
+
+fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
+    const encseckey = impl.from_file(impl.PrivateKey, seckeyfile, allocator) catch |err| return handle_file_error(seckeyfile, err);
+    const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
+    defer allocator.free(msg);
+    var seckey = try decrypt_secret_key(&encseckey);
+    defer impl.zerosingle(&seckey);
+    const signature = try impl.sign_message(seckey, msg);
+    const keyname = std.fs.path.basename(seckeyfile);
+    const comment = try std.mem.concat(allocator, u8, &[_][]const u8{ "verify with ", keyname[0 .. keyname.len - 3], "pub" });
+    defer allocator.free(comment);
+    try impl.write_base64_file(sigfile, comment, impl.as_bytes(signature), allocator);
+}
+
+fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
+    const pubkey = impl.from_file(impl.PubKey, pubkeyfile, allocator) catch |err| return handle_file_error(pubkeyfile, err);
+    const sig = impl.from_file(impl.Signature, sigfile, allocator) catch |err| return handle_file_error(sigfile, err);
+    const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
+    defer allocator.free(msg);
+    return impl.verify_message(pubkey, sig, msg);
+}
+
+fn decrypt_secret_key(seckey: *const impl.PrivateKey) !impl.PrivateKey {
+    if (seckey.kdfrounds == 0) {
+        return seckey.*;
+    } else {
+        var pwstor: [1024]u8 = undefined;
+        defer zero(u8, &pwstor);
+        const passphrase = try getpass.getpass("Passphrase: ", &pwstor);
+        return try seckey.decrypt(passphrase);
+    }
+}
+
 fn handle_file_error(file: []const u8, err: anyerror) !void {
     const msg = switch (err) {
         error.UnsupportedAlgorithm => "Signature algorithm used is not supported by this tool.",
@@ -190,25 +207,4 @@ fn handle_file_error(file: []const u8, err: anyerror) !void {
     };
     print("{s}: {s}\n", .{ file, msg });
     return ExitError;
-}
-
-pub fn main() !void {
-    //const allocator = std.heap.page_allocator;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = &gpa.allocator;
-
-    const args = Args.parse_cmdline() catch std.os.exit(1);
-    // if (args.msgfile != null and args.sigfile == null) {
-    //     args.sigfile = try std.mem.concat(allocator, u8, &[_][]const u8{ args.msgfile.?, ".sig" });
-    //     defer allocator.free(args.sigfile.?);
-    // } // scope ends here, so UAF ensues
-    args.run(allocator) catch |err| {
-        switch (err) {
-            getpass.PassphraseTooLong => print("The given passphrase is too long.\n", .{}),
-            ExitError => {},
-            else => return err,
-        }
-        std.os.exit(1);
-    };
 }

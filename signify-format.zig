@@ -9,25 +9,6 @@ const bcrypt_pbkdf = @import("bcrypt_pbkdf.zig").bcrypt_pbkdf;
 
 const comment_hdr = "untrusted comment: ";
 
-fn from_bytes(comptime T: type, bytes: []const u8) !T {
-    const size = @sizeOf(T);
-    if (bytes.len != size)
-        return error.InvalidLength;
-    var self = @bitCast(T, bytes[0..size].*);
-    try self.check();
-    return self;
-}
-
-pub fn from_file(comptime T: type, path: []const u8, allocator: *std.mem.Allocator) !T {
-    const data = try read_base64_file(path, allocator);
-    defer allocator.free(data);
-    return from_bytes(T, data);
-}
-
-pub fn as_bytes(self: anytype) []const u8 {
-    return @bitCast([@sizeOf(@TypeOf(self))]u8, self)[0..];
-}
-
 pub const Signature = packed struct {
     /// This is always "Ed" for Ed25519.
     pkalg: [2]u8,
@@ -93,32 +74,6 @@ pub const PrivateKey = packed struct {
     }
 };
 
-fn host_to_network(comptime T: type, value: T) T {
-    return switch (endian) {
-        .Big => value,
-        .Little => @byteSwap(T, value),
-    };
-}
-
-const network_to_host = host_to_network;
-
-pub fn zerosingle(obj: anytype) void {
-    zero(@TypeOf(obj.*), @as(*[1]@TypeOf(obj.*), obj));
-}
-
-pub fn verify_message(pubkey: PubKey, signature: Signature, msg: []const u8) !void {
-    if (!std.mem.eql(u8, &pubkey.keynum, &signature.keynum)) {
-        return error.WrongPublicKey;
-    }
-    return Ed25519.verify(signature.sig, msg, pubkey.pubkey);
-}
-
-fn secure_random(comptime nbytes: u32) [nbytes]u8 {
-    var ret: [nbytes]u8 = undefined;
-    std.crypto.random.bytes(&ret);
-    return ret;
-}
-
 pub const KeyPair = struct {
     pubkey: PubKey,
     seckey: PrivateKey,
@@ -167,6 +122,13 @@ pub fn sign_message(privatekey: PrivateKey, msg: []const u8) !Signature {
     return Signature{ .pkalg = "Ed".*, .keynum = privatekey.keynum, .sig = sig };
 }
 
+pub fn verify_message(pubkey: PubKey, signature: Signature, msg: []const u8) !void {
+    if (!std.mem.eql(u8, &pubkey.keynum, &signature.keynum)) {
+        return error.WrongPublicKey;
+    }
+    return Ed25519.verify(signature.sig, msg, pubkey.pubkey);
+}
+
 pub fn read_file(path: []const u8, max_size: u32, allocator: *std.mem.Allocator) ![]u8 {
     return try std.fs.cwd().readFileAlloc(allocator, path, max_size);
 }
@@ -209,4 +171,42 @@ pub fn write_base64_file(path: []const u8, comment: []const u8, data: []const u8
     try file.writeAll("\n");
     try file.writeAll(encoded);
     try file.writeAll("\n");
+}
+
+fn secure_random(comptime nbytes: u32) [nbytes]u8 {
+    var ret: [nbytes]u8 = undefined;
+    std.crypto.random.bytes(&ret);
+    return ret;
+}
+
+fn from_bytes(comptime T: type, bytes: []const u8) !T {
+    const size = @sizeOf(T);
+    if (bytes.len != size)
+        return error.InvalidLength;
+    var self = @bitCast(T, bytes[0..size].*);
+    try self.check();
+    return self;
+}
+
+pub fn from_file(comptime T: type, path: []const u8, allocator: *std.mem.Allocator) !T {
+    const data = try read_base64_file(path, allocator);
+    defer allocator.free(data);
+    return from_bytes(T, data);
+}
+
+pub fn as_bytes(self: anytype) []const u8 {
+    return @bitCast([@sizeOf(@TypeOf(self))]u8, self)[0..];
+}
+
+fn host_to_network(comptime T: type, value: T) T {
+    return switch (endian) {
+        .Big => value,
+        .Little => @byteSwap(T, value),
+    };
+}
+
+const network_to_host = host_to_network;
+
+pub fn zerosingle(obj: anytype) void {
+    zero(@TypeOf(obj.*), @as(*[1]@TypeOf(obj.*), obj));
 }
