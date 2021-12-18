@@ -104,11 +104,27 @@ fn host_to_network(comptime T: type, value: T) T {
 
 const network_to_host = host_to_network;
 
+fn zerosingle(obj: anytype) void {
+    zero(@TypeOf(obj.*), @as(*[1]@TypeOf(obj.*), obj));
+}
+
+fn decrypt_secret_key(seckey: *const PrivateKey) !PrivateKey {
+    if (seckey.kdfrounds == 0) {
+        return seckey.*;
+    } else {
+        var pwstor: [1024]u8 = undefined;
+        defer zero(u8, &pwstor);
+        const passphrase = try getpass("Passphrase: ", &pwstor);
+        return try seckey.decrypt(passphrase);
+    }
+}
+
 fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
     const encseckey = try from_file(PrivateKey, seckeyfile, allocator);
     const msg = try read_file(msgfile, 65535, allocator);
     defer allocator.free(msg);
-    const seckey = try encseckey.decrypt("");
+    var seckey = try decrypt_secret_key(&encseckey);
+    defer zerosingle(&seckey);
     const signature = try sign_message(seckey, msg);
     const keyname = std.fs.path.basename(seckeyfile);
     const comment = try std.mem.concat(allocator, u8, &[_][]const u8{ "verify with ", keyname[0 .. keyname.len - 3], "pub" });
