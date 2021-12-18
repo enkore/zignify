@@ -138,12 +138,12 @@ pub fn read_base64_file(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
     defer allocator.free(sig_contents);
     var iter = std.mem.split(sig_contents, "\n");
 
-    var line = iter.next().?;
+    var line = iter.next() orelse return error.InvalidFile;
     if (std.mem.startsWith(u8, line, comment_hdr)) {
-        line = iter.next().?;
+        line = iter.next() orelse return error.InvalidFile;
     }
 
-    const empty_line = iter.next().?;
+    const empty_line = iter.next() orelse return error.InvalidFile;
     if (empty_line.len > 0) {
         return error.GarbageAtEndOfFile;
     }

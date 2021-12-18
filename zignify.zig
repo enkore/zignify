@@ -197,12 +197,46 @@ fn decrypt_secret_key(seckey: *const impl.PrivateKey) !impl.PrivateKey {
 
 fn handle_file_error(file: []const u8, err: anyerror) !void {
     const msg = switch (err) {
-        error.UnsupportedAlgorithm => "Signature algorithm used is not supported by this tool.",
-        error.InvalidLength => "Invalid length of encoded data.",
-        error.GarbageAtEndOfFile => "Unexpected data at end of file.",
-        error.WrongPassphrase => "Wrong passphrase or corrupted secret key.",
-        error.WrongPublicKey => "Signed with a different public key.",
-        error.FileNotFound => "File not found.", // XXX: there is probably a better way to do this than re-do strerror() here, yeah?
+        error.UnsupportedAlgorithm => "Signature algorithm used is not supported by this tool",
+        error.InvalidLength => "Invalid length of encoded data",
+        error.GarbageAtEndOfFile => "Unexpected data at end of file",
+        error.InvalidFile => "File has invalid format",
+        error.WrongPassphrase => "Wrong passphrase or corrupted secret key",
+        error.WrongPublicKey => "Signed with a different public key",
+
+        // XXX: there is probably a better way to do this than re-do strerror() here, yeah?
+
+        error.AccessDenied => "Access denied",
+        error.BadPathName => "Bad path name",
+        error.BrokenPipe => "Broken pipe",
+        error.ConnectionResetByPeer => "Connection reset by peer",
+        error.ConnectionTimedOut => "Connection timed out",
+        error.DeviceBusy => "Device busy",
+        error.FileLocksNotSupported => "File locks not supported",
+        error.FileNotFound => "File not found",
+        error.FileTooBig => "File too big",
+        error.InputOutput => "I/O error",
+        error.InvalidCharacter => "Invalid character",
+        error.InvalidPadding => "Invalid padding",
+        error.InvalidUtf8 => "Invalid UTF-8 path",
+        error.IsDir => "Is a directory",
+        error.NameTooLong => "Name too long",
+        error.NoDevice => "No device",
+        error.NoSpaceLeft => "No space left on device",
+        error.NotDir => "Not a directory",
+        error.NotOpenForReading => "Not opened for reading",
+        error.OperationAborted => "Operation aborted",
+        error.OutOfMemory => "Out of memory",
+        error.PathAlreadyExists => "Path already exists",
+        error.PipeBusy => "Pipe busy",
+        error.ProcessFdQuotaExceeded => "Process fd quota exceeded",
+        error.SharingViolation => "Sharing violation",
+        error.SymLinkLoop => "Symlink loop",
+        error.SystemFdQuotaExceeded => "System fd quota exceeded",
+        error.SystemResources => "Kernel is out of memory",
+        error.Unexpected => "Unexpected error?",
+        error.Unseekable => "Unseekable file",
+        error.WouldBlock => "Operation would block",
         else => return err,
     };
     print("{s}: {s}\n", .{ file, msg });
