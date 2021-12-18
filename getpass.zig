@@ -1,12 +1,14 @@
-const os = @import("std").os;
-const io = @import("std").io;
+const std = @import("std");
+const os = std.os;
+const io = std.io;
 
-const PassphraseTooLong = error.PassphraseTooLong;
+pub const PassphraseTooLong = error.PassphraseTooLong;
+pub const NoPassphraseGiven = error.NoPassphraseGiven;
 
 // *nix only
 // OpenBSD has readpassphrase in libc.
 // This is pretty much musl's getpass implementation.
-pub fn get_password(prompt: []const u8, password: []u8) ![]u8 {
+pub fn getpass(prompt: []const u8, password: []u8) ![]u8 {
     if (os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY, 0)) |fd| {
         defer os.close(fd);
 
@@ -28,9 +30,11 @@ pub fn get_password(prompt: []const u8, password: []u8) ![]u8 {
 
         _ = try os.write(fd, prompt);
         const read = try os.read(fd, password);
-        if (read == password.len or read < 1)
-            return PassphraseTooLong;
         _ = try os.write(fd, "\n");
+        if (read == password.len)
+            return PassphraseTooLong;
+        if (read < 2)
+            return NoPassphraseGiven;
         return password[0 .. read - 1];
     } else |err| {
         // no tty, print prompt to stderr and read passphrase from stdin
@@ -38,9 +42,11 @@ pub fn get_password(prompt: []const u8, password: []u8) ![]u8 {
         const stdin = io.getStdIn();
         try stderr.writeAll(prompt);
         if (stdin.reader().readUntilDelimiterOrEof(password, '\n')) |maybe_input| {
-            const input = maybe_input orelse return PassphraseTooLong;
+            const input = maybe_input orelse return NoPassphraseGiven;
             if (input.len == password.len)
                 return PassphraseTooLong;
+            if (input.len == 0)
+                return NoPassphraseGiven;
             return input;
         } else |readerr| switch (readerr) {
             error.StreamTooLong => return PassphraseTooLong,
