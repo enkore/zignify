@@ -6,7 +6,7 @@ const b64decoder = std.base64.standard.Decoder;
 const b64encoder = std.base64.standard.Encoder;
 const endian = @import("builtin").target.cpu.arch.endian();
 const getopt = @import("getopt.zig");
-
+const zero = std.crypto.utils.secureZero;
 const bcrypt_pbkdf = @import("bcrypt_pbkdf.zig").bcrypt_pbkdf;
 
 const comment_hdr = "untrusted comment: ";
@@ -144,8 +144,18 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, passphrase: []co
         SHA512.hash(&keypair.secret_key, &key_digest, .{});
         break :checksum key_digest[0..8];
     };
-    // TODO key encryption for passphrase.len>0
-    const salt: [16]u8 = secure_random(16);
+    const kdfrounds: u32 = if (passphrase.len > 0) 42 else 0; // 42 rounds is used by signify
+    const kdfsalt: [16]u8 = secure_random(16);
+    const encrypted_key = if (kdfrounds > 0) key: {
+        var xorkey: [Ed25519.secret_length]u8 = undefined;
+        var enckey: [Ed25519.secret_length]u8 = keypair.secret_key;
+        try bcrypt_pbkdf(passphrase, kdfsalt[0..], xorkey[0..], kdfrounds);
+        for (xorkey) |keybyte, index|
+            enckey[index] ^= keybyte;
+        break :key enckey;
+    } else key: {
+        break :key keypair.secret_key;
+    };
     const pubkey = PubKey{
         .pkalg = "Ed".*,
         .keynum = secure_random(8),
@@ -154,11 +164,11 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, passphrase: []co
     const seckey = PrivateKey{
         .pkalg = "Ed".*,
         .kdfalg = "BK".*,
-        .kdfrounds = if (passphrase.len > 0) 42 else 0, // 42 rounds is used by signify
-        .salt = salt,
+        .kdfrounds = host_to_network(u32, kdfrounds),
+        .salt = kdfsalt,
         .checksum = checksum.*,
         .keynum = pubkey.keynum,
-        .seckey = keypair.secret_key,
+        .seckey = encrypted_key,
     };
     try write_base64_file(seckeyfile, "signify secret key", as_bytes(seckey), allocator);
     try write_base64_file(pubkeyfile, "signify public key", as_bytes(pubkey), allocator);
@@ -226,6 +236,7 @@ const Args = struct {
     embedded: bool = false,
     comment: ?[]const u8 = null,
     msgfile: ?[]const u8 = null,
+    usepass: bool = true,
     pubkeyfile: ?[]const u8 = null,
     seckeyfile: ?[]const u8 = null,
     sigfile: ?[]const u8 = null,
@@ -250,7 +261,7 @@ const Args = struct {
     }
 
     fn parse_cmdline() Usage!Args {
-        var opts = getopt.getopt("GSVChec:m:p:s:x:");
+        var opts = getopt.getopt("GSVChec:m:np:s:x:");
         var self = Args{};
         while (opts.next()) |maybe_opt| {
             if (maybe_opt) |opt| {
@@ -268,6 +279,7 @@ const Args = struct {
                     'e' => self.embedded = true,
                     'c' => self.comment = opt.arg.?,
                     'm' => self.msgfile = opt.arg.?,
+                    'n' => self.usepass = false,
                     'p' => self.pubkeyfile = opt.arg.?,
                     's' => self.seckeyfile = opt.arg.?,
                     'x' => self.sigfile = opt.arg.?,
@@ -307,6 +319,8 @@ const Args = struct {
     }
 };
 
+const getpass = @import("getpass.zig").get_password;
+
 pub fn main() !void {
     //const allocator = std.heap.page_allocator;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -326,7 +340,15 @@ pub fn main() !void {
     defer if (default_sigfile) |df| allocator.free(df); // so unconditional defer, conditional free
 
     switch (args.operation.?) {
-        .Generate => try generate_key(args.pubkeyfile.?, args.seckeyfile.?, "", allocator),
+        .Generate => {
+            var pwstor: [1024]u8 = undefined;
+            defer zero(u8, &pwstor);
+            const passphrase = if (args.usepass)
+                try getpass("Passphrase for new key: ", &pwstor)
+            else
+                "";
+            try generate_key(args.pubkeyfile.?, args.seckeyfile.?, passphrase, allocator);
+        },
         .Sign => {
             try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, allocator);
         },
