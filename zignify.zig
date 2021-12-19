@@ -163,8 +163,8 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, a
         "";
 
     const pair = try impl.generate_keypair(passphrase);
-    try impl.write_base64_file(seckeyfile, "signify secret key", impl.as_bytes(pair.seckey), allocator);
-    try impl.write_base64_file(pubkeyfile, "signify public key", impl.as_bytes(pair.pubkey), allocator);
+    impl.write_base64_file(seckeyfile, "signify secret key", impl.as_bytes(pair.seckey), allocator) catch |err| return handle_file_error(seckeyfile, err);
+    impl.write_base64_file(pubkeyfile, "signify public key", impl.as_bytes(pair.pubkey), allocator) catch |err| return handle_file_error(pubkeyfile, err);
 }
 
 fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, allocator: *std.mem.Allocator) !void {
