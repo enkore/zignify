@@ -34,7 +34,8 @@ pub const PubKey = packed struct {
     }
 };
 
-pub const PrivateKey = packed struct {
+/// A possibly encrypted secret key.
+pub const SecretKey = packed struct {
     pkalg: [2]u8,
     /// BK = bcrypt_pbkdf
     kdfalg: [2]u8,
@@ -48,7 +49,7 @@ pub const PrivateKey = packed struct {
     /// Ed25519 private key XORed with output of bcrypt_pbkdf (or nulls, if kdfrounds=0).
     seckey: [Ed25519.secret_length]u8,
 
-    fn check(self: *PrivateKey) !void {
+    fn check(self: *SecretKey) !void {
         if (!std.mem.eql(u8, &self.pkalg, "Ed"))
             return error.UnsupportedAlgorithm;
         if (!std.mem.eql(u8, &self.kdfalg, "BK"))
@@ -56,11 +57,15 @@ pub const PrivateKey = packed struct {
         self.kdfrounds = network_to_host(u32, self.kdfrounds);
     }
 
-    pub fn decrypt(self: PrivateKey, passphrase: []const u8) !PrivateKey {
+    pub fn is_encrypted(self: SecretKey) bool {
+        return self.kdfrounds > 0;
+    }
+
+    pub fn decrypt(self: SecretKey, passphrase: []const u8) !DecryptedSecretKey {
         var xorkey: [Ed25519.secret_length]u8 = undefined;
         var enckey: [Ed25519.secret_length]u8 = self.seckey;
-        if (self.kdfrounds == 0)
-            return self;
+        if (!self.is_encrypted())
+            return DecryptedSecretKey{ .keynum = self.keynum, .seckey = self.seckey };
         try bcrypt_pbkdf(passphrase, self.salt[0..], xorkey[0..], self.kdfrounds);
         for (xorkey) |keybyte, index|
             enckey[index] ^= keybyte;
@@ -70,13 +75,18 @@ pub const PrivateKey = packed struct {
         if (!std.mem.eql(u8, key_digest[0..8], &self.checksum))
             return error.WrongPassphrase;
 
-        return PrivateKey{ .pkalg = self.pkalg, .kdfalg = self.kdfalg, .kdfrounds = self.kdfrounds, .salt = self.salt, .checksum = self.checksum, .keynum = self.keynum, .seckey = enckey };
+        return DecryptedSecretKey{ .keynum = self.keynum, .seckey = enckey };
     }
+};
+
+pub const DecryptedSecretKey = struct {
+    keynum: [8]u8,
+    seckey: [Ed25519.secret_length]u8,
 };
 
 pub const KeyPair = struct {
     pubkey: PubKey,
-    seckey: PrivateKey,
+    seckey: SecretKey,
 };
 
 pub fn generate_keypair(passphrase: []const u8) !KeyPair {
@@ -104,7 +114,7 @@ pub fn generate_keypair(passphrase: []const u8) !KeyPair {
         .keynum = secure_random(8),
         .pubkey = keypair.public_key,
     };
-    const seckey = PrivateKey{
+    const seckey = SecretKey{
         .pkalg = "Ed".*,
         .kdfalg = "BK".*,
         .kdfrounds = host_to_network(u32, kdfrounds),
@@ -116,7 +126,7 @@ pub fn generate_keypair(passphrase: []const u8) !KeyPair {
     return KeyPair{ .pubkey = pubkey, .seckey = seckey };
 }
 
-pub fn sign_message(privatekey: PrivateKey, msg: []const u8) !Signature {
+pub fn sign_message(privatekey: DecryptedSecretKey, msg: []const u8) !Signature {
     const keypair = Ed25519.KeyPair.fromSecretKey(privatekey.seckey);
     const sig = try Ed25519.sign(msg, keypair, null);
     return Signature{ .pkalg = "Ed".*, .keynum = privatekey.keynum, .sig = sig };

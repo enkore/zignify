@@ -154,7 +154,7 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, a
     const passphrase = if (encrypt)
         getpass.getpass("Passphrase for new key: ", &pwstor) catch |err| switch (err) {
             getpass.NoPassphraseGiven => {
-                print("If you wish to not encrypt the key, use the -n switch,\n", .{});
+                print("If you wish to not encrypt the key, use the -n switch.\n", .{});
                 return ExitError;
             },
             else => return err,
@@ -168,7 +168,7 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, a
 }
 
 fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, allocator: *std.mem.Allocator) !void {
-    const encseckey = impl.from_file(impl.PrivateKey, seckeyfile, null, allocator) catch |err| return handle_file_error(seckeyfile, err);
+    const encseckey = impl.from_file(impl.SecretKey, seckeyfile, null, allocator) catch |err| return handle_file_error(seckeyfile, err);
     const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
     defer allocator.free(msg);
     var seckey = try decrypt_secret_key(&encseckey);
@@ -214,14 +214,14 @@ fn read_file_offset(filename: []const u8, offset: usize, allocator: *std.mem.All
     return try file.readToEndAlloc(allocator, 123456);
 }
 
-fn decrypt_secret_key(seckey: *const impl.PrivateKey) !impl.PrivateKey {
-    if (seckey.kdfrounds == 0) {
-        return seckey.*;
-    } else {
+fn decrypt_secret_key(seckey: *const impl.SecretKey) !impl.DecryptedSecretKey {
+    if (seckey.is_encrypted()) {
         var pwstor: [1024]u8 = undefined;
         defer zero(u8, &pwstor);
         const passphrase = try getpass.getpass("Passphrase: ", &pwstor);
         return try seckey.decrypt(passphrase);
+    } else {
+        return try seckey.decrypt("");
     }
 }
 
