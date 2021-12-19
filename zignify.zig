@@ -162,6 +162,16 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, a
     else
         "";
 
+    if (encrypt) {
+        var pwstor2: [1024]u8 = undefined;
+        defer zero(u8, &pwstor2);
+        const confirm_passphrase = try getpass.getpass("Confirm passphrase for new key: ", &pwstor);
+        if (!std.mem.eql(u8, passphrase, confirm_passphrase)) {
+            print("Passphrases do no match.\n", .{});
+            return ExitError;
+        }
+    }
+
     const pair = try impl.generate_keypair(passphrase);
     impl.write_base64_file(seckeyfile, "signify secret key", impl.as_bytes(pair.seckey), allocator) catch |err| return handle_file_error(seckeyfile, err);
     impl.write_base64_file(pubkeyfile, "signify public key", impl.as_bytes(pair.pubkey), allocator) catch |err| return handle_file_error(pubkeyfile, err);
