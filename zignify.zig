@@ -171,7 +171,7 @@ fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, e
     const encseckey = impl.from_file(impl.SecretKey, seckeyfile, null, allocator) catch |err| return handle_file_error(seckeyfile, err);
     const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
     defer allocator.free(msg);
-    var seckey = try decrypt_secret_key(&encseckey);
+    var seckey = decrypt_secret_key(&encseckey) catch |err| return handle_file_error(seckeyfile, err);
     defer impl.zerosingle(&seckey);
     const signature = try impl.sign_message(seckey, msg);
     const keyname = std.fs.path.basename(seckeyfile);
@@ -233,6 +233,9 @@ fn handle_file_error(file: []const u8, err: anyerror) !void {
         error.InvalidFile => "File has invalid format",
         error.WrongPassphrase => "Wrong passphrase or corrupted secret key",
         error.WrongPublicKey => "Signed with a different public key",
+
+        error.NoPassphraseGiven => "Passphrase is required",
+        error.PassphraseTooLong => "Passphrase is too long",
 
         // XXX: there is probably a better way to do this than re-do strerror() here, yeah?
 
