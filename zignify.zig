@@ -127,7 +127,7 @@ const Args = struct {
 
         switch (args.operation.?) {
             .Generate => try generate_key(args.pubkeyfile.?, args.seckeyfile.?, args.usepass, allocator),
-            .Sign => try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, allocator),
+            .Sign => try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, args.embedded, allocator),
             .Verify => {
                 const result = if (args.embedded)
                     verify_embedded_file(args.pubkeyfile.?, args.sigfile.?, allocator)
@@ -167,7 +167,7 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, a
     try impl.write_base64_file(pubkeyfile, "signify public key", impl.as_bytes(pair.pubkey), allocator);
 }
 
-fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
+fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, allocator: *std.mem.Allocator) !void {
     const encseckey = impl.from_file(impl.PrivateKey, seckeyfile, null, allocator) catch |err| return handle_file_error(seckeyfile, err);
     const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
     defer allocator.free(msg);
@@ -178,6 +178,12 @@ fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, a
     const comment = try std.mem.concat(allocator, u8, &[_][]const u8{ "verify with ", keyname[0 .. keyname.len - 3], "pub" });
     defer allocator.free(comment);
     try impl.write_base64_file(sigfile, comment, impl.as_bytes(signature), allocator);
+    if (embedded) {
+        const file = std.fs.cwd().openFile(sigfile, .{ .write = true }) catch |err| return handle_file_error(msgfile, err);
+        defer file.close();
+        file.seekFromEnd(0) catch |err| return handle_file_error(sigfile, err);
+        file.writeAll(msg) catch |err| return handle_file_error(sigfile, err);
+    }
 }
 
 fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
