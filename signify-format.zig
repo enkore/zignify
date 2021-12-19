@@ -133,24 +133,32 @@ pub fn read_file(path: []const u8, max_size: u32, allocator: *std.mem.Allocator)
     return try std.fs.cwd().readFileAlloc(allocator, path, max_size);
 }
 
-pub fn read_base64_file(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
-    const sig_contents = try read_file(path, 4096, allocator);
-    defer allocator.free(sig_contents);
-    var iter = std.mem.split(sig_contents, "\n");
-
+/// read signify-base64 file at *path*. If *data_len* is specified,
+/// the file is assumed to be in <header><payload> format and data_len
+/// will receive the length of the header (in bytes).
+pub fn read_base64_file(path: []const u8, data_len: ?*usize, allocator: *std.mem.Allocator) ![]u8 {
+    var contents_buf: [2048]u8 = undefined;
+    const contents = try std.fs.cwd().readFile(path, &contents_buf);
+    var iter = std.mem.split(contents, "\n");
     var line = iter.next() orelse return error.InvalidFile;
+    var length = line.len;
     if (std.mem.startsWith(u8, line, comment_hdr)) {
         line = iter.next() orelse return error.InvalidFile;
+        length += line.len + 1; // +1 due to \n not being part of line
     }
-
     const empty_line = iter.next() orelse return error.InvalidFile;
-    if (empty_line.len > 0) {
-        return error.GarbageAtEndOfFile;
+    if (data_len != null) {
+        length += 1;
+        data_len.?.* = length;
+    } else {
+        // If no data follows the base64 portion, check that the file is terminated with \n.
+        if (empty_line.len > 0) {
+            return error.GarbageAtEndOfFile;
+        }
+        if (iter.next() != null) {
+            return error.GarbageAtEndOfFile;
+        }
     }
-    if (iter.next() != null) {
-        return error.GarbageAtEndOfFile;
-    }
-
     const dec = try allocator.alloc(u8, try b64decoder.calcSizeForSlice(line));
     try b64decoder.decode(dec[0..dec.len], line);
     return dec;
@@ -188,8 +196,8 @@ fn from_bytes(comptime T: type, bytes: []const u8) !T {
     return self;
 }
 
-pub fn from_file(comptime T: type, path: []const u8, allocator: *std.mem.Allocator) !T {
-    const data = try read_base64_file(path, allocator);
+pub fn from_file(comptime T: type, path: []const u8, data_len: ?*usize, allocator: *std.mem.Allocator) !T {
+    const data = try read_base64_file(path, data_len, allocator);
     defer allocator.free(data);
     return from_bytes(T, data);
 }

@@ -98,7 +98,7 @@ const Args = struct {
         switch (self.operation.?) {
             .Generate => if (self.seckeyfile == null or self.pubkeyfile == null) try usage(),
             .Sign => if (self.seckeyfile == null or self.msgfile == null) try usage(),
-            .Verify => if (self.pubkeyfile == null or self.msgfile == null) try usage(),
+            .Verify => if (self.pubkeyfile == null or (self.msgfile == null and !self.embedded)) try usage(),
             .VerifyList => if (self.pubkeyfile == null or self.sigfile == null) try usage(),
         }
         if (self.seckeyfile) |secname| {
@@ -129,7 +129,11 @@ const Args = struct {
             .Generate => try generate_key(args.pubkeyfile.?, args.seckeyfile.?, args.usepass, allocator),
             .Sign => try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, allocator),
             .Verify => {
-                if (verify_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, allocator)) {
+                const result = if (args.embedded)
+                    verify_embedded_file(args.pubkeyfile.?, args.sigfile.?, allocator)
+                else
+                    verify_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, allocator);
+                if (result) {
                     print("Signature verified\n", .{});
                 } else |err| switch (err) {
                     error.SignatureVerificationFailed => {
@@ -164,7 +168,7 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, a
 }
 
 fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
-    const encseckey = impl.from_file(impl.PrivateKey, seckeyfile, allocator) catch |err| return handle_file_error(seckeyfile, err);
+    const encseckey = impl.from_file(impl.PrivateKey, seckeyfile, null, allocator) catch |err| return handle_file_error(seckeyfile, err);
     const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
     defer allocator.free(msg);
     var seckey = try decrypt_secret_key(&encseckey);
@@ -177,11 +181,27 @@ fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, a
 }
 
 fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
-    const pubkey = impl.from_file(impl.PubKey, pubkeyfile, allocator) catch |err| return handle_file_error(pubkeyfile, err);
-    const sig = impl.from_file(impl.Signature, sigfile, allocator) catch |err| return handle_file_error(sigfile, err);
+    const pubkey = impl.from_file(impl.PubKey, pubkeyfile, null, allocator) catch |err| return handle_file_error(pubkeyfile, err);
+    const sig = impl.from_file(impl.Signature, sigfile, null, allocator) catch |err| return handle_file_error(sigfile, err);
     const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
     defer allocator.free(msg);
-    return impl.verify_message(pubkey, sig, msg);
+    return impl.verify_message(pubkey, sig, msg) catch |err| return handle_file_error(msgfile, err);
+}
+
+fn verify_embedded_file(pubkeyfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
+    const pubkey = impl.from_file(impl.PubKey, pubkeyfile, null, allocator) catch |err| return handle_file_error(pubkeyfile, err);
+    var siglen: usize = undefined;
+    const sig = impl.from_file(impl.Signature, sigfile, &siglen, allocator) catch |err| return handle_file_error(sigfile, err);
+    const msg = read_file_offset(sigfile, siglen, allocator) catch |err| return handle_file_error(sigfile, err);
+    defer allocator.free(msg);
+    return impl.verify_message(pubkey, sig, msg) catch |err| return handle_file_error(sigfile, err);
+}
+
+fn read_file_offset(filename: []const u8, offset: usize, allocator: *std.mem.Allocator) ![]const u8 {
+    const file = try std.fs.cwd().openFile(filename, .{});
+    defer file.close();
+    try file.seekTo(offset);
+    return try file.readToEndAlloc(allocator, 123456);
 }
 
 fn decrypt_secret_key(seckey: *const impl.PrivateKey) !impl.PrivateKey {
