@@ -12,14 +12,14 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = &gpa.allocator;
+    var err_context: []const u8 = "";
 
     const args = Args.parse_cmdline() catch std.os.exit(1);
-    args.run(allocator) catch |err| {
-        switch (err) {
-            getpass.PassphraseTooLong => print("The given passphrase is too long.\n", .{}),
+    args.run(&err_context, allocator) catch |err| {
+        handle_file_error(err_context, err) catch |moderr| switch (moderr) {
             ExitError => {},
-            else => return err,
-        }
+            else => return moderr,
+        };
         std.os.exit(1);
     };
 }
@@ -118,7 +118,7 @@ const Args = struct {
         return self;
     }
 
-    fn run(args: *const Args, allocator: *std.mem.Allocator) !void {
+    fn run(args: *const Args, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
         const default_sigfile = if (args.msgfile) |msgfile|
             try std.mem.concat(allocator, u8, &[_][]const u8{ msgfile, ".sig" })
         else
@@ -126,13 +126,13 @@ const Args = struct {
         defer if (default_sigfile) |df| allocator.free(df); // so unconditional defer, conditional free
 
         switch (args.operation.?) {
-            .Generate => try generate_key(args.pubkeyfile.?, args.seckeyfile.?, args.usepass, allocator),
-            .Sign => try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, args.embedded, allocator),
+            .Generate => try generate_key(args.pubkeyfile.?, args.seckeyfile.?, args.usepass, err_context, allocator),
+            .Sign => try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, args.embedded, err_context, allocator),
             .Verify => {
                 const result = if (args.embedded)
-                    verify_embedded_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile.?, allocator)
+                    verify_embedded_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile.?, err_context, allocator)
                 else
-                    verify_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, allocator);
+                    verify_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, err_context, allocator);
                 if (result) {
                     print("Signature verified\n", .{});
                 } else |err| switch (err) {
@@ -148,7 +148,7 @@ const Args = struct {
     }
 };
 
-fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, allocator: *std.mem.Allocator) !void {
+fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
     var pwstor: [1024]u8 = undefined;
     defer zero(u8, &pwstor);
     const passphrase = if (encrypt)
@@ -173,48 +173,61 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, a
     }
 
     const pair = try impl.generate_keypair(passphrase);
-    impl.write_base64_file(seckeyfile, "signify secret key", impl.as_bytes(pair.seckey), allocator) catch |err| return handle_file_error(seckeyfile, err);
-    impl.write_base64_file(pubkeyfile, "signify public key", impl.as_bytes(pair.pubkey), allocator) catch |err| return handle_file_error(pubkeyfile, err);
+    err_context.* = seckeyfile;
+    try impl.write_base64_file(seckeyfile, "signify secret key", impl.as_bytes(pair.seckey), allocator);
+    err_context.* = pubkeyfile;
+    try impl.write_base64_file(pubkeyfile, "signify public key", impl.as_bytes(pair.pubkey), allocator);
 }
 
-fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, allocator: *std.mem.Allocator) !void {
-    const encseckey = impl.from_file(impl.SecretKey, seckeyfile, null, allocator) catch |err| return handle_file_error(seckeyfile, err);
-    const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
+fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
+    err_context.* = seckeyfile;
+    const encseckey = try impl.from_file(impl.SecretKey, seckeyfile, null, allocator);
+    err_context.* = msgfile;
+    const msg = try impl.read_file(msgfile, 65535, allocator);
     defer allocator.free(msg);
-    var seckey = decrypt_secret_key(&encseckey) catch |err| return handle_file_error(seckeyfile, err);
+    err_context.* = seckeyfile;
+    var seckey = try decrypt_secret_key(&encseckey);
     defer impl.zerosingle(&seckey);
     const signature = try impl.sign_message(seckey, msg);
     const keyname = std.fs.path.basename(seckeyfile);
     const comment = try std.mem.concat(allocator, u8, &[_][]const u8{ "verify with ", keyname[0 .. keyname.len - 3], "pub" });
     defer allocator.free(comment);
+    err_context.* = sigfile;
     try impl.write_base64_file(sigfile, comment, impl.as_bytes(signature), allocator);
     if (embedded) {
-        const file = std.fs.cwd().openFile(sigfile, .{ .write = true }) catch |err| return handle_file_error(msgfile, err);
+        err_context.* = sigfile;
+        const file = try std.fs.cwd().openFile(sigfile, .{ .write = true });
         defer file.close();
-        file.seekFromEnd(0) catch |err| return handle_file_error(sigfile, err);
-        file.writeAll(msg) catch |err| return handle_file_error(sigfile, err);
+        try file.seekFromEnd(0);
+        try file.writeAll(msg);
     }
 }
 
-fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
-    const pubkey = impl.from_file(impl.PubKey, pubkeyfile, null, allocator) catch |err| return handle_file_error(pubkeyfile, err);
-    const sig = impl.from_file(impl.Signature, sigfile, null, allocator) catch |err| return handle_file_error(sigfile, err);
-    const msg = impl.read_file(msgfile, 65535, allocator) catch |err| return handle_file_error(msgfile, err);
+fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
+    err_context.* = pubkeyfile;
+    const pubkey = try impl.from_file(impl.PubKey, pubkeyfile, null, allocator);
+    err_context.* = sigfile;
+    const sig = try impl.from_file(impl.Signature, sigfile, null, allocator);
+    err_context.* = msgfile;
+    const msg = try impl.read_file(msgfile, 65535, allocator);
     defer allocator.free(msg);
-    return impl.verify_message(pubkey, sig, msg) catch |err| return handle_file_error(msgfile, err);
+    try impl.verify_message(pubkey, sig, msg);
 }
 
-fn verify_embedded_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, allocator: *std.mem.Allocator) !void {
-    const pubkey = impl.from_file(impl.PubKey, pubkeyfile, null, allocator) catch |err| return handle_file_error(pubkeyfile, err);
+fn verify_embedded_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
+    err_context.* = pubkeyfile;
+    const pubkey = try impl.from_file(impl.PubKey, pubkeyfile, null, allocator);
     var siglen: usize = undefined;
-    const sig = impl.from_file(impl.Signature, sigfile, &siglen, allocator) catch |err| return handle_file_error(sigfile, err);
-    const msg = read_file_offset(sigfile, siglen, allocator) catch |err| return handle_file_error(sigfile, err);
+    err_context.* = sigfile;
+    const sig = try impl.from_file(impl.Signature, sigfile, &siglen, allocator);
+    const msg = try read_file_offset(sigfile, siglen, allocator);
     defer allocator.free(msg);
-    impl.verify_message(pubkey, sig, msg) catch |err| return handle_file_error(sigfile, err);
+    try impl.verify_message(pubkey, sig, msg);
     // write verified contents to -m msgfile
-    const file = std.fs.cwd().createFile(msgfile, .{ .truncate = true }) catch |err| return handle_file_error(msgfile, err);
+    err_context.* = msgfile;
+    const file = try std.fs.cwd().createFile(msgfile, .{ .truncate = true });
     defer file.close();
-    file.writeAll(msg) catch |err| return handle_file_error(sigfile, err);
+    try file.writeAll(msg);
 }
 
 fn read_file_offset(filename: []const u8, offset: usize, allocator: *std.mem.Allocator) ![]const u8 {
