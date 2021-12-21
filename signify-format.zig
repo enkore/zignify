@@ -54,7 +54,7 @@ pub const SecretKey = packed struct {
             return error.UnsupportedAlgorithm;
         if (!std.mem.eql(u8, &self.kdfalg, "BK"))
             return error.UnsupportedAlgorithm;
-        self.kdfrounds = network_to_host(u32, self.kdfrounds);
+        self.kdfrounds = std.mem.bigToNative(u32, self.kdfrounds);
     }
 
     pub fn is_encrypted(self: SecretKey) bool {
@@ -117,7 +117,7 @@ pub fn generate_keypair(passphrase: []const u8) !KeyPair {
     const seckey = SecretKey{
         .pkalg = "Ed".*,
         .kdfalg = "BK".*,
-        .kdfrounds = host_to_network(u32, kdfrounds),
+        .kdfrounds = std.mem.nativeToBig(u32, kdfrounds),
         .salt = kdfsalt,
         .checksum = checksum.*,
         .keynum = pubkey.keynum,
@@ -137,10 +137,6 @@ pub fn verify_message(pubkey: PubKey, signature: Signature, msg: []const u8) !vo
         return error.WrongPublicKey;
     }
     return Ed25519.verify(signature.sig, msg, pubkey.pubkey);
-}
-
-pub fn read_file(path: []const u8, max_size: u32, allocator: *std.mem.Allocator) ![]u8 {
-    return try std.fs.cwd().readFileAlloc(allocator, path, max_size);
 }
 
 /// read signify-base64 file at *path*. If *data_len* is specified,
@@ -212,15 +208,6 @@ pub fn from_file(comptime T: type, path: []const u8, data_len: ?*usize, allocato
 pub fn as_bytes(self: anytype) []const u8 {
     return @bitCast([@sizeOf(@TypeOf(self))]u8, self)[0..];
 }
-
-fn host_to_network(comptime T: type, value: T) T {
-    return switch (endian) {
-        .Big => value,
-        .Little => @byteSwap(T, value),
-    };
-}
-
-const network_to_host = host_to_network;
 
 pub fn zerosingle(obj: anytype) void {
     zero(@TypeOf(obj.*), @as(*[1]@TypeOf(obj.*), obj));

@@ -192,7 +192,7 @@ fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, e
     err_context.* = seckeyfile;
     const encseckey = try impl.from_file(impl.SecretKey, seckeyfile, null, allocator);
     err_context.* = msgfile;
-    const msg = try impl.read_file(msgfile, 65535, allocator); // XXX 64K<1G
+    const msg = try read_file(msgfile, 65535, allocator); // XXX 64K<1G
     defer allocator.free(msg);
     err_context.* = seckeyfile;
     var seckey = try decrypt_secret_key(&encseckey);
@@ -218,7 +218,7 @@ fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8,
     err_context.* = sigfile;
     const sig = try impl.from_file(impl.Signature, sigfile, null, allocator);
     err_context.* = msgfile;
-    const msg = try impl.read_file(msgfile, 65535, allocator); // XXX 64K<1G
+    const msg = try read_file(msgfile, 65535, allocator); // XXX 64K<1G
     defer allocator.free(msg);
     try impl.verify_message(pubkey, sig, msg);
 }
@@ -243,7 +243,11 @@ fn read_file_offset(filename: []const u8, offset: usize, allocator: *std.mem.All
     const file = try std.fs.cwd().openFile(filename, .{});
     defer file.close();
     try file.seekTo(offset);
-    return try file.readToEndAlloc(allocator, 123456);
+    return try file.readToEndAlloc(allocator, 123456); // XXX <1G
+}
+
+fn read_file(path: []const u8, max_size: u32, allocator: *std.mem.Allocator) ![]u8 {
+    return try std.fs.cwd().readFileAlloc(allocator, path, max_size);
 }
 
 fn decrypt_secret_key(seckey: *const impl.SecretKey) !impl.DecryptedSecretKey {
