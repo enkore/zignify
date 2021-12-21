@@ -45,11 +45,15 @@ const Args = struct {
 
     fn usage() Usage!void {
         print(
-            \\usage: {0s} -G [-c comment] -p pubkey -s seckey
-            \\       {0s} -S [-e] [-x sigfile] -s seckey -m message
-            \\       {0s} -V [-e] -p pubkey [-x sigfile] -m message
+            \\usage: {0s} -G [-c comment] [-n] -p pubkey -s seckey
+            \\       {0s} -S [-e] [-x sigfile] -s seckey -m msgfile
+            \\       {0s} -V [-e] -p pubkey [-x sigfile] -m msgfile
             \\       {0s} -C -p pubkey -x sigfile
             \\
+            \\modes:
+            \\ -G generate new key pair (-n to not use a passphrase for encryption)
+            \\ -S sign file, -e embeds the message into the signature file.
+            \\ -V verify file, -e indicates sigfile contains the message, which is written to msgfile.
         , .{std.fs.path.basename(std.mem.spanZ(std.os.argv[0]))});
         return error.Usage;
     }
@@ -126,7 +130,7 @@ const Args = struct {
         defer if (default_sigfile) |df| allocator.free(df); // so unconditional defer, conditional free
 
         switch (args.operation.?) {
-            .Generate => try generate_key(args.pubkeyfile.?, args.seckeyfile.?, args.usepass, err_context, allocator),
+            .Generate => try generate_key(args.pubkeyfile.?, args.seckeyfile.?, args.usepass, args.comment, err_context, allocator),
             .Sign => try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, args.embedded, err_context, allocator),
             .Verify => {
                 const result = if (args.embedded)
@@ -148,7 +152,7 @@ const Args = struct {
     }
 };
 
-fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
+fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, comment: ?[]const u8, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
     var pwstor: [1024]u8 = undefined;
     defer zero(u8, &pwstor);
     const passphrase = if (encrypt)
@@ -172,18 +176,23 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, e
         }
     }
 
+    const seccomment = try std.mem.concat(allocator, u8, &[_][]const u8{ comment orelse "signify", " secret key" });
+    defer allocator.free(seccomment);
+    const pubcomment = try std.mem.concat(allocator, u8, &[_][]const u8{ comment orelse "signify", " public key" });
+    defer allocator.free(pubcomment);
+
     const pair = try impl.generate_keypair(passphrase);
     err_context.* = seckeyfile;
-    try impl.write_base64_file(seckeyfile, "signify secret key", impl.as_bytes(pair.seckey), allocator);
+    try impl.write_base64_file(seckeyfile, seccomment, impl.as_bytes(pair.seckey), allocator);
     err_context.* = pubkeyfile;
-    try impl.write_base64_file(pubkeyfile, "signify public key", impl.as_bytes(pair.pubkey), allocator);
+    try impl.write_base64_file(pubkeyfile, pubcomment, impl.as_bytes(pair.pubkey), allocator);
 }
 
 fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
     err_context.* = seckeyfile;
     const encseckey = try impl.from_file(impl.SecretKey, seckeyfile, null, allocator);
     err_context.* = msgfile;
-    const msg = try impl.read_file(msgfile, 65535, allocator);
+    const msg = try impl.read_file(msgfile, 65535, allocator); // XXX 64K<1G
     defer allocator.free(msg);
     err_context.* = seckeyfile;
     var seckey = try decrypt_secret_key(&encseckey);
@@ -209,7 +218,7 @@ fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8,
     err_context.* = sigfile;
     const sig = try impl.from_file(impl.Signature, sigfile, null, allocator);
     err_context.* = msgfile;
-    const msg = try impl.read_file(msgfile, 65535, allocator);
+    const msg = try impl.read_file(msgfile, 65535, allocator); // XXX 64K<1G
     defer allocator.free(msg);
     try impl.verify_message(pubkey, sig, msg);
 }
