@@ -10,7 +10,7 @@ pub const NoPassphraseGiven = error.NoPassphraseGiven;
 // This is pretty much musl's getpass implementation.
 pub fn getpass(prompt: []const u8, password: []u8) ![]u8 {
     errdefer std.crypto.utils.secureZero(u8, password);
-    if (os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY, 0)) |fd| {
+    if (os.open("/dev/tty", os.O.RDWR | os.O.NOCTTY, 0)) |fd| {
         defer os.close(fd);
 
         const orig = try os.tcgetattr(fd);
@@ -18,11 +18,11 @@ pub fn getpass(prompt: []const u8, password: []u8) ![]u8 {
         // local (terminal) flags: don't echo, don't generate signals, canonical mode
         // canonical mode basically means that the terminal does line editing and only
         // sends complete lines.
-        no_echo.lflag &= ~@as(u32, os.ECHO | os.ISIG); // XXX: these constant should be explicitly typed as tcflag_t/u32, no?
-        no_echo.lflag |= os.ICANON;
+        no_echo.lflag &= ~(os.system.ECHO | os.system.ISIG);
+        no_echo.lflag |= os.system.ICANON;
         // input flags: newline handling - not entirely sure what's needed here and what isn't.
-        no_echo.iflag &= ~@as(u32, os.INLCR | os.IGNCR);
-        no_echo.iflag |= os.ICRNL;
+        no_echo.iflag &= ~(os.system.INLCR | os.system.IGNCR);
+        no_echo.iflag |= os.system.ICRNL;
 
         try os.tcsetattr(fd, os.TCSA.FLUSH, no_echo);
         defer os.tcsetattr(fd, os.TCSA.FLUSH, orig) catch {};

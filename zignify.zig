@@ -11,7 +11,7 @@ pub fn main() !void {
     //const allocator = std.heap.page_allocator;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator();
     var err_context: []const u8 = "";
 
     const args = Args.parse_cmdline() catch std.os.exit(1);
@@ -54,7 +54,8 @@ const Args = struct {
             \\ -G generate new key pair (-n to not use a passphrase for encryption)
             \\ -S sign file, -e embeds the message into the signature file.
             \\ -V verify file, -e indicates sigfile contains the message, which is written to msgfile.
-        , .{std.fs.path.basename(std.mem.spanZ(std.os.argv[0]))});
+            \\
+        , .{std.fs.path.basename(std.mem.sliceTo(std.os.argv[0], 0))});
         return error.Usage;
     }
 
@@ -122,7 +123,7 @@ const Args = struct {
         return self;
     }
 
-    fn run(args: *const Args, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
+    fn run(args: *const Args, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
         const default_sigfile = if (args.msgfile) |msgfile|
             try std.mem.concat(allocator, u8, &[_][]const u8{ msgfile, ".sig" })
         else
@@ -152,7 +153,7 @@ const Args = struct {
     }
 };
 
-fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, comment: ?[]const u8, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
+fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, comment: ?[]const u8, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
     var pwstor: [1024]u8 = undefined;
     defer zero(u8, &pwstor);
     const passphrase = if (encrypt)
@@ -188,7 +189,7 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, c
     try impl.write_base64_file(pubkeyfile, pubcomment, impl.as_bytes(pair.pubkey), allocator);
 }
 
-fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
+fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
     err_context.* = seckeyfile;
     const encseckey = try impl.from_file(impl.SecretKey, seckeyfile, null, allocator);
     err_context.* = msgfile;
@@ -212,7 +213,7 @@ fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, e
     }
 }
 
-fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
+fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
     err_context.* = pubkeyfile;
     const pubkey = try impl.from_file(impl.PubKey, pubkeyfile, null, allocator);
     err_context.* = sigfile;
@@ -223,7 +224,7 @@ fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8,
     try impl.verify_message(pubkey, sig, msg);
 }
 
-fn verify_embedded_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]const u8, allocator: *std.mem.Allocator) !void {
+fn verify_embedded_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
     err_context.* = pubkeyfile;
     const pubkey = try impl.from_file(impl.PubKey, pubkeyfile, null, allocator);
     var siglen: usize = undefined;
@@ -239,14 +240,14 @@ fn verify_embedded_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []
     try file.writeAll(msg);
 }
 
-fn read_file_offset(filename: []const u8, offset: usize, allocator: *std.mem.Allocator) ![]const u8 {
+fn read_file_offset(filename: []const u8, offset: usize, allocator: std.mem.Allocator) ![]const u8 {
     const file = try std.fs.cwd().openFile(filename, .{});
     defer file.close();
     try file.seekTo(offset);
     return try file.readToEndAlloc(allocator, 123456); // XXX <1G
 }
 
-fn read_file(path: []const u8, max_size: u32, allocator: *std.mem.Allocator) ![]u8 {
+fn read_file(path: []const u8, max_size: u32, allocator: std.mem.Allocator) ![]u8 {
     return try std.fs.cwd().readFileAlloc(allocator, path, max_size);
 }
 
