@@ -9,6 +9,7 @@ pub const NoPassphraseGiven = error.NoPassphraseGiven;
 // OpenBSD has readpassphrase in libc.
 // This is pretty much musl's getpass implementation.
 pub fn getpass(prompt: []const u8, password: []u8) ![]u8 {
+    errdefer std.crypto.utils.secureZero(u8, password);
     if (os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY, 0)) |fd| {
         defer os.close(fd);
 
