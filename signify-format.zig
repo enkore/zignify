@@ -179,10 +179,7 @@ pub fn write_base64_file(path: []const u8, comment: []const u8, data: []const u8
     defer allocator.free(encode_buf);
     const encoded = b64encoder.encode(encode_buf, data);
 
-    const file = try std.fs.cwd().createFile(
-        path,
-        .{ .truncate = true },
-    );
+    const file = try std.fs.cwd().createFile(path, .{ .exclusive = true });
     defer file.close();
     try file.writeAll(comment_hdr);
     try file.writeAll(comment);
