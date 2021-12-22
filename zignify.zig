@@ -7,12 +7,21 @@ const getpass = @import("getpass.zig");
 
 const ExitError = error.ExitError;
 
+var argv: [][:0]const u8 = undefined;
+
 pub fn main() !void {
     //const allocator = std.heap.page_allocator;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var err_context: []const u8 = "";
+
+    argv = try std.process.argsAlloc(allocator);
+    defer {
+        //        for (argv) |arg|
+        //          allocator.free(arg);  // why is this not needed?
+        allocator.free(argv);
+    }
 
     const args = Args.parse_cmdline() catch std.os.exit(1);
     args.run(&err_context, allocator) catch |err| {
@@ -55,7 +64,7 @@ const Args = struct {
             \\ -S sign file, -e embeds the message into the signature file.
             \\ -V verify file, -e indicates sigfile contains the message, which is written to msgfile.
             \\
-        , .{std.fs.path.basename(std.mem.sliceTo(std.os.argv[0], 0))});
+        , .{std.fs.path.basename(std.mem.sliceTo(argv[0], 0))});
         return error.Usage;
     }
 
@@ -66,7 +75,7 @@ const Args = struct {
     }
 
     fn parse_cmdline() Usage!Args {
-        var opts = getopt.getopt("GSVChec:m:np:s:x:");
+        var opts = getopt.OptionsIterator{ .argv = argv, .opts = "GSVChec:m:np:s:x:" };
         var self = Args{};
         while (opts.next()) |maybe_opt| {
             if (maybe_opt) |opt| {

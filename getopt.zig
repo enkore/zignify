@@ -29,7 +29,7 @@ pub const Option = struct {
 pub const Error = error{ InvalidOption, MissingArgument };
 
 pub const OptionsIterator = struct {
-    argv: [][*:0]const u8,
+    argv: [][:0]const u8,
     opts: []const u8,
 
     /// Index of the current element of the argv vector.
@@ -46,7 +46,7 @@ pub const OptionsIterator = struct {
 
         const arg = self.argv[self.optind];
 
-        if (mem.eql(u8, mem.span(arg), "--")) {
+        if (mem.eql(u8, arg[0..2], "--")) {
             self.optind += 1;
             return null;
         }
@@ -62,7 +62,7 @@ pub const OptionsIterator = struct {
                 if (arg[self.optpos + 1] != 0) {
                     const res = Option{
                         .opt = self.optopt,
-                        .arg = mem.span(arg + self.optpos + 1),
+                        .arg = arg[self.optpos + 1 ..],
                     };
                     self.optind += 1;
                     self.optpos = 1;
@@ -70,7 +70,7 @@ pub const OptionsIterator = struct {
                 } else if (self.optind + 1 < self.argv.len) {
                     const res = Option{
                         .opt = self.optopt,
-                        .arg = mem.span(self.argv[self.optind + 1]),
+                        .arg = self.argv[self.optind + 1],
                     };
                     self.optind += 2;
                     self.optpos = 1;
