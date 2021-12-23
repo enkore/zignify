@@ -14,8 +14,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    var err_context: []const u8 = "";
-
+    var err_context: []u8 = try allocator.alloc(u8, 0);
+    defer allocator.free(err_context);
     argv = try std.process.argsAlloc(allocator);
     defer {
         //        for (argv) |arg|
@@ -132,7 +132,7 @@ const Args = struct {
         return self;
     }
 
-    fn run(args: *const Args, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
+    fn run(args: *const Args, err_context: *[]u8, allocator: std.mem.Allocator) !void {
         const default_sigfile = if (args.msgfile) |msgfile|
             try std.mem.concat(allocator, u8, &[_][]const u8{ msgfile, ".sig" })
         else
@@ -162,7 +162,7 @@ const Args = struct {
     }
 };
 
-fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, comment: ?[]const u8, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
+fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, comment: ?[]const u8, err_context: *[]u8, allocator: std.mem.Allocator) !void {
     var pwstor: [1024]u8 = undefined;
     defer zero(u8, &pwstor);
     const passphrase = if (encrypt)
@@ -192,29 +192,28 @@ fn generate_key(pubkeyfile: []const u8, seckeyfile: []const u8, encrypt: bool, c
     defer allocator.free(pubcomment);
 
     const pair = try impl.generate_keypair(passphrase);
-    err_context.* = seckeyfile;
+    try set_err_context(allocator, err_context, seckeyfile);
     try impl.write_base64_file(seckeyfile, seccomment, impl.as_bytes(pair.seckey), allocator);
-    err_context.* = pubkeyfile;
+    try set_err_context(allocator, err_context, pubkeyfile);
     try impl.write_base64_file(pubkeyfile, pubcomment, impl.as_bytes(pair.pubkey), allocator);
 }
 
-fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
-    err_context.* = seckeyfile;
+fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, embedded: bool, err_context: *[]u8, allocator: std.mem.Allocator) !void {
+    try set_err_context(allocator, err_context, seckeyfile);
     const encseckey = try impl.from_file(impl.SecretKey, seckeyfile, null, allocator);
-    err_context.* = msgfile;
+    try set_err_context(allocator, err_context, msgfile);
     const msg = try read_file(msgfile, 65535, allocator); // XXX 64K<1G
     defer allocator.free(msg);
-    err_context.* = seckeyfile;
+    try set_err_context(allocator, err_context, seckeyfile);
     var seckey = try decrypt_secret_key(&encseckey);
     defer impl.zerosingle(&seckey);
     const signature = try impl.sign_message(seckey, msg);
     const keyname = std.fs.path.basename(seckeyfile);
     const comment = try std.mem.concat(allocator, u8, &[_][]const u8{ "verify with ", keyname[0 .. keyname.len - 3], "pub" });
     defer allocator.free(comment);
-    err_context.* = sigfile;
+    try set_err_context(allocator, err_context, sigfile);
     try impl.write_base64_file(sigfile, comment, impl.as_bytes(signature), allocator);
     if (embedded) {
-        err_context.* = sigfile;
         const file = try std.fs.cwd().openFile(sigfile, .{ .write = true });
         defer file.close();
         try file.seekFromEnd(0);
@@ -222,28 +221,28 @@ fn sign_file(seckeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, e
     }
 }
 
-fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
-    err_context.* = pubkeyfile;
+fn verify_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]u8, allocator: std.mem.Allocator) !void {
+    try set_err_context(allocator, err_context, pubkeyfile);
     const pubkey = try impl.from_file(impl.PubKey, pubkeyfile, null, allocator);
-    err_context.* = sigfile;
+    try set_err_context(allocator, err_context, sigfile);
     const sig = try impl.from_file(impl.Signature, sigfile, null, allocator);
-    err_context.* = msgfile;
+    try set_err_context(allocator, err_context, msgfile);
     const msg = try read_file(msgfile, 65535, allocator); // XXX 64K<1G
     defer allocator.free(msg);
     try impl.verify_message(pubkey, sig, msg);
 }
 
-fn verify_embedded_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]const u8, allocator: std.mem.Allocator) !void {
-    err_context.* = pubkeyfile;
+fn verify_embedded_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []const u8, err_context: *[]u8, allocator: std.mem.Allocator) !void {
+    try set_err_context(allocator, err_context, pubkeyfile);
     const pubkey = try impl.from_file(impl.PubKey, pubkeyfile, null, allocator);
     var siglen: usize = undefined;
-    err_context.* = sigfile;
+    try set_err_context(allocator, err_context, sigfile);
     const sig = try impl.from_file(impl.Signature, sigfile, &siglen, allocator);
     const msg = try read_file_offset(sigfile, siglen, allocator);
     defer allocator.free(msg);
     try impl.verify_message(pubkey, sig, msg);
     // write verified contents to -m msgfile
-    err_context.* = msgfile;
+    try set_err_context(allocator, err_context, msgfile);
     const file = try std.fs.cwd().createFile(msgfile, .{ .truncate = true });
     defer file.close();
     try file.writeAll(msg);
@@ -269,6 +268,14 @@ fn decrypt_secret_key(seckey: *const impl.SecretKey) !impl.DecryptedSecretKey {
     } else {
         return try seckey.decrypt("");
     }
+}
+
+fn set_err_context(allocator: std.mem.Allocator, err_context: *[]u8, ctx: []const u8) !void {
+    if (err_context.len < ctx.len) {
+        allocator.free(err_context.*);
+        err_context.* = try allocator.alloc(u8, ctx.len);
+    }
+    std.mem.copy(u8, err_context.*, ctx);
 }
 
 fn handle_file_error(file: []const u8, err: anyerror) !void {
