@@ -243,7 +243,7 @@ fn verify_embedded_file(pubkeyfile: []const u8, msgfile: []const u8, sigfile: []
     try impl.verify_message(pubkey, sig, msg);
     // write verified contents to -m msgfile
     try set_err_context(allocator, err_context, msgfile);
-    const file = try std.fs.cwd().createFile(msgfile, .{ .truncate = true });
+    const file = try std.fs.cwd().createFile(msgfile, .{ .exclusive = true });
     defer file.close();
     try file.writeAll(msg);
 }
@@ -313,7 +313,7 @@ fn handle_file_error(file: []const u8, err: anyerror) !void {
         error.NotOpenForReading => "Not opened for reading",
         error.OperationAborted => "Operation aborted",
         error.OutOfMemory => "Out of memory",
-        error.PathAlreadyExists => "Path already exists",
+        error.PathAlreadyExists => "File already exists",
         error.PipeBusy => "Pipe busy",
         error.ProcessFdQuotaExceeded => "Process fd quota exceeded",
         error.SharingViolation => "Sharing violation",
