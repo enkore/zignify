@@ -144,7 +144,7 @@ const Args = struct {
             .Sign => try sign_file(args.seckeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, args.embedded, err_context, allocator),
             .Verify => {
                 const result = if (args.embedded)
-                    verify_embedded_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile.?, err_context, allocator)
+                    verify_embedded_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, err_context, allocator)
                 else
                     verify_file(args.pubkeyfile.?, args.msgfile.?, args.sigfile orelse default_sigfile.?, err_context, allocator);
                 if (result) {
